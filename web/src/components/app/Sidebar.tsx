@@ -7,6 +7,7 @@ import { fadeUp } from '@/lib/motion';
 import type { TaskHandlers } from '@/lib/taskControls';
 import { agentName, ago, groupTasks, taskState, type GroupId } from '@/lib/tasks';
 import { useStoredState } from '@/lib/useStoredState';
+import NotificationMenu from './NotificationMenu';
 import RepositoryMenu from './RepositoryMenu';
 import StatusIcon from './StatusIcon';
 import TaskMenu from './TaskMenu';
@@ -132,6 +133,7 @@ export default function Sidebar({ ref, repository, repositories, tasks, hasMore,
           <span className={`size-1.5 rounded-full ${live ? 'bg-green' : 'bg-orange'}`} />
           {connection}
         </span>
+        <NotificationMenu />
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5 px-2 pt-1.5 pb-2">

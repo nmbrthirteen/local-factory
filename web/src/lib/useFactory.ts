@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TaskStatus } from '@shared/domain';
 import type { AgentProbe, FactoryState, Task, TaskEvent } from '@shared/types';
 import { api, connectLive } from './live';
+import { arrivals, chime, readNotifyMode, showBadge, unseenAfter, wantsBanner, wantsSound, without } from './notifications';
 import { mergeEvents, refreshQueue } from './sync';
 import { groupTasks, repoName, taskState } from './tasks';
 
@@ -10,7 +12,6 @@ type Detail = { task: Task; events: TaskEvent[] };
 type DetailResponse = Detail & { hasMore: boolean };
 type Success<T> = string | ((result: T) => string);
 
-const notifyStates = ['awaiting_approval', 'handoff', 'failed'];
 const searchDebounceMs = 180;
 const noticeMs = 5000;
 
@@ -27,7 +28,8 @@ export function useFactory() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState<AgentState>({ harness: '', probe: null, error: '' });
-  const live = useRef({ selected, query, events: [] as TaskEvent[], loadedFor: null as string | null, probing: 0, statuses: new Map<string, string>() });
+  const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
+  const live = useRef({ selected, query, events: [] as TaskEvent[], loadedFor: null as string | null, probing: 0, statuses: new Map<string, TaskStatus>() });
   const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const probe = useCallback(async (harness: string) => {
@@ -47,6 +49,7 @@ export function useFactory() {
     live.current.loadedFor = null;
     setSelected(id);
     setDetail(null);
+    setUnseen(current => without(current, id));
     history.replaceState(null, '', id ? `#${new URLSearchParams({ task: id })}` : location.pathname);
     refreshRef.current();
   }, []);
@@ -54,11 +57,14 @@ export function useFactory() {
   useEffect(() => {
     const notifyChanges = (next: FactoryState) => {
       const previous = live.current.statuses;
-      live.current.statuses = new Map(next.tasks.map(task => [task.id, task.status]));
-      if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
-      for (const task of next.tasks) {
-        const before = previous.get(task.id);
-        if (!before || before === task.status || !notifyStates.includes(task.status)) continue;
+      live.current.statuses = new Map([...previous, ...next.tasks.map(task => [task.id, task.status] as const)]);
+      const fresh = arrivals(previous, next.tasks).filter(task => document.hidden || task.id !== live.current.selected);
+      setUnseen(current => unseenAfter(current, next.tasks, fresh));
+      if (!fresh.length) return;
+      const mode = readNotifyMode();
+      if (wantsSound(mode)) chime();
+      if (!wantsBanner(mode) || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+      for (const task of fresh) {
         const notification = new Notification(task.title, { body: `${taskState(task).label} · ${repoName(task.repository)}`, tag: task.id });
         notification.onclick = () => {
           window.focus();
@@ -116,9 +122,19 @@ export function useFactory() {
     return () => clearTimeout(timer);
   }, [query]);
 
+  const attention = (state?.needsYou ?? 0) + unseen.size;
   useEffect(() => {
-    document.title = state?.needsYou ? `(${state.needsYou}) Local Factory` : 'Local Factory';
-  }, [state?.needsYou]);
+    document.title = attention ? `(${attention}) Local Factory` : 'Local Factory';
+    showBadge(attention);
+  }, [attention]);
+
+  useEffect(() => {
+    const clearViewed = () => {
+      if (!document.hidden) setUnseen(current => without(current, live.current.selected));
+    };
+    document.addEventListener('visibilitychange', clearViewed);
+    return () => document.removeEventListener('visibilitychange', clearViewed);
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -163,6 +179,7 @@ export function useFactory() {
     busy,
     act,
     agent,
+    unseen,
     chooseAgent,
     reprobe: () => probe(agent.harness),
     refresh: () => refreshRef.current(),

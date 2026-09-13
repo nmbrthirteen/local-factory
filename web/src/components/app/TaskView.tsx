@@ -94,19 +94,19 @@ export default function TaskView({ task, events, locked, busy, handlersFor, onBa
                 className={`flex items-center gap-1.5 text-[13px] ${segment(view === id)}`}
               >
                 {label}
-                {id === 'changes' && task.patch && <span className="size-1.5 rounded-full bg-accent" aria-label="Changes available" />}
-                {id === 'preview' && task.preview && <span className={`size-1.5 rounded-full ${task.preview.status === 'failed' ? 'bg-red' : task.preview.errors.length ? 'bg-orange' : 'bg-accent'}`} aria-label="Screenshots available" />}
+                {id === 'changes' && task.patch && <span role="img" className="size-1.5 rounded-full bg-accent" aria-label="Changes available" />}
+                {id === 'preview' && task.preview && <span role="img" className={`size-1.5 rounded-full ${task.preview.status === 'failed' ? 'bg-red' : task.preview.errors.length ? 'bg-orange' : 'bg-accent'}`} aria-label="Screenshots available" />}
               </button>
             ))}
           </div>
           {view === 'activity' && (
-            <div role="group" aria-label="Activity detail" className="flex items-center">
+            <fieldset aria-label="Activity detail" className="m-0 flex min-w-0 items-center border-0 p-0">
               {verbosities.map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={verbosity === value} onClick={() => setVerbosity(value)} className={`text-[12px] ${segment(verbosity === value)}`}>
                   {label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           )}
         </div>
       </header>

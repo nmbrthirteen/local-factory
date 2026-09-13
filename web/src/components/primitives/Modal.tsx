@@ -21,7 +21,7 @@ export default function Modal({ open, label, onClose, children, className = 'w-[
         event.preventDefault();
         onClose();
       }}
-      onPointerDown={event => {
+      onClick={event => {
         if (event.target === event.currentTarget) onClose();
       }}
       className={`m-auto ${className} overflow-hidden rounded-window border-0 bg-surface p-0 text-ink shadow-overlay backdrop:bg-black/40`}

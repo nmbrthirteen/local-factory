@@ -41,12 +41,13 @@ export class LiveApps {
     });
     const current: Current = { id, app, stopping: false };
     this.current = current;
-    void app.exited.then(async code => {
+    void app.exited.then(code => {
       if (this.current === current) this.current = null;
-      await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
-      if (!this.store.get(id)) return;
-      this.store.update(id, { liveApp: null });
-      this.store.event(id, 'app_stopped', current.stopping ? 'App stopped' : `App exited: ${code}`, { output: app.log() });
+      if (this.store.get(id)) {
+        this.store.update(id, { liveApp: null });
+        this.store.event(id, 'app_stopped', current.stopping ? 'App stopped' : `App exited: ${code}`, { output: app.log() });
+      }
+      return rm(scratch, { recursive: true, force: true }).catch(() => undefined);
     });
     this.store.event(id, 'app_started', 'App running', { url: app.url, command });
     return this.store.update(id, { liveApp: { url: app.url, command, startedAt: now() } });
@@ -73,6 +74,5 @@ export class LiveApps {
     this.current = null;
     current.app.stop();
     await current.app.exited;
-    await Bun.sleep(0);
   }
 }

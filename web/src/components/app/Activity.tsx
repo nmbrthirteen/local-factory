@@ -97,7 +97,7 @@ function EventRow({ step, taskId }: { step: EventEntry; taskId: string }) {
       {step.images.length > 0 && (
         <div className="mt-1 mb-1 ml-6 flex flex-wrap items-start gap-2.5">
           {step.images.map((shot, index) => (
-            <Screenshot key={index} src={`/api/tasks/${taskId}/image?event=${step.id}&index=${index}`} shot={shot} alt={step.label} className="rounded-control" imageClassName="h-[168px] w-auto max-w-full" />
+            <Screenshot key={shot.name} src={`/api/tasks/${taskId}/image?event=${step.id}&index=${index}`} shot={shot} alt={step.label} className="rounded-control" imageClassName="h-[168px] w-auto max-w-full" />
           ))}
         </div>
       )}
@@ -193,9 +193,10 @@ export default function Activity({ task, events, verbosity, locked, busy, onAnsw
 
   return (
     <div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" className="relative flex min-h-0 flex-1 flex-col">
-      <div
+      <section
         ref={scroller}
         id="activity-scroll"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the feed scrolls on its own, so keyboard users need to focus it to scroll
         tabIndex={0}
         aria-label="Activity history"
         onScroll={event => {
@@ -215,7 +216,7 @@ export default function Activity({ task, events, verbosity, locked, busy, onAnsw
           {isWorking(task.status) && <LoadingState label={taskState(task).label} since={task.startedAt} />}
         </div>
         {compact && dock}
-      </div>
+      </section>
       {!following && (
         <Button id="latest" variant="secondary" size="sm" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 shadow-raised" onClick={() => setFollowing(true)}>
           Jump to latest

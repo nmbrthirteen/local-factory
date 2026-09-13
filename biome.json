@@ -22,7 +22,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "a11y": { "noAutofocus": "off" },
       "correctness": {
         "useExhaustiveDependencies": { "level": "error", "options": { "reportUnnecessaryDependencies": false } }
@@ -39,6 +39,10 @@
         "web/src/components/primitives/LoadingState.tsx"
       ],
       "linter": { "rules": { "suspicious": { "noArrayIndexKey": "off" } } }
+    },
+    {
+      "includes": ["web/src/components/primitives/Modal.tsx"],
+      "linter": { "rules": { "a11y": { "useKeyWithClickEvents": "off" } } }
     }
   ]
 }

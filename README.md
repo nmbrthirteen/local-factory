@@ -28,6 +28,8 @@ You describe a change. Codex, Claude, or OpenCode builds it in its own Git workt
 
 Bun, TypeScript, SQLite, React, Tailwind, Vite, Git worktrees, macOS `sandbox-exec`.
 
+Interface components use [Beautiful UI](https://www.beautifului.dev/), adapted to the app.
+
 ## Run it
 
 Needs macOS, [Bun](https://bun.sh) 1.2.10+, Git, and `codex-cli 0.154.0`. Sign in to the agents you use.

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createInterface, type Interface } from 'node:readline';
 import { MissingCommandError, run, safeEnv, stopProcessGroup } from '../process';
 
-export const supportedVersion = '0.154.0';
+const supportedVersion = '0.154.0';
 
 const defaultArgs = ['app-server', '--stdio', '--disable', 'hooks', '--disable', 'apps', '--disable', 'plugins', '-c', 'mcp_servers={}'];
 const clientInfo = { name: 'local_factory', title: 'Local Factory', version: '0.3.0' };

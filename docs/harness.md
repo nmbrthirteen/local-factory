@@ -134,5 +134,5 @@ SIGINT or SIGTERM stops the active run, running commands, and the running app. A
 
 ## Not built yet
 
-- Independent reviewer: a fresh session for the exact candidate with the criteria, diff, and check evidence, and source writes blocked. `agents/reviewer.md` is a draft that no run uses.
+- Independent reviewer: a fresh session for the exact candidate with the criteria, diff, and check evidence, and source writes blocked.
 - Repair loop with findings: reviewer findings start a bounded repair attempt, then the check and review run again. A new candidate invalidates earlier evidence.

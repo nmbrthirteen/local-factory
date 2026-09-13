@@ -26,7 +26,7 @@ export type TaskHandlers = {
   remove: () => void;
 };
 
-export type ControlId = 'start' | 'stop' | 'pullRequest' | 'merge' | 'commit' | 'uncommit' | 'settle' | 'unsettle';
+type ControlId = 'start' | 'stop' | 'pullRequest' | 'merge' | 'commit' | 'uncommit' | 'settle' | 'unsettle';
 export type Control = { label: string; disabled: boolean; run: () => void; elementId?: string; hint?: string };
 
 export function taskControls(task: TaskLike, locked: boolean, busy: boolean, handlers: TaskHandlers) {

@@ -20,7 +20,7 @@ export const autonomyModes: { value: Autonomy; name: string; description: string
   { value: 'full', name: 'Automatic, full access', description: 'Approves network and file access outside the worktree. Up to 3 attempts, 45 minutes each.' },
 ];
 
-export const taskGroups: [GroupId, string][] = [['attention', 'Needs you'], ['working', 'Working'], ['review', 'Ready for review'], ['queued', 'Not started'], ['done', 'Settled']];
+const taskGroups: [GroupId, string][] = [['attention', 'Needs you'], ['working', 'Working'], ['review', 'Ready for review'], ['queued', 'Not started'], ['done', 'Settled']];
 
 export const agentName = (harness?: Harness | null) => agents[harness ?? 'codex'].name;
 export const repoName = (path?: string | null) => (path ?? '').split('/').filter(Boolean).at(-1) ?? '';
@@ -146,7 +146,7 @@ type StepState = Extract<StatusKind, 'running' | 'info' | 'failed' | 'soft' | 's
 type EntryBase = { id: number; at: string; type: string; raw: string; toolId?: string; state: StepState; output: string; exitCode?: number; finished?: boolean };
 export type ToolEntry = EntryBase & { kind: 'tool'; verb: string; icon: ToolIcon; target: string };
 export type MessageEntry = EntryBase & { kind: 'message'; text: string };
-export type EventImage = Pick<PreviewShot, 'name' | 'width' | 'height'>;
+type EventImage = Pick<PreviewShot, 'name' | 'width' | 'height'>;
 export type EventEntry = EntryBase & { kind: 'event'; label: string; text: string; images: EventImage[] };
 export type ToolGroupStep = { kind: 'tools'; id: number; at: string; items: ToolEntry[] };
 export type ActivityStep = MessageEntry | EventEntry | ToolGroupStep;

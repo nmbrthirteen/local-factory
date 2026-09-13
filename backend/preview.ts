@@ -11,7 +11,7 @@ const pollMs = 250;
 const settleMs = 300;
 const logLimit = 4000;
 const previewScripts = ['preview', 'dev', 'start', 'ui', 'serve'];
-export const viewports = [
+const viewports = [
   { name: 'desktop', width: 1280, height: 800 },
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
@@ -133,7 +133,7 @@ export async function pageErrors(browser: Browser, session: string) {
   return [...lines(errors), ...lines(consoleOutput).filter(line => /\berror\b/i.test(line))];
 }
 
-export const captureWithAgentBrowser: Capture = async (url, directory, session) => {
+const captureWithAgentBrowser: Capture = async (url, directory, session) => {
   const shots: PreviewShot[] = [];
   try {
     for (const [index, { name }] of viewports.entries()) {

@@ -186,4 +186,4 @@ export function useFactory() {
   };
 }
 
-export type Factory = ReturnType<typeof useFactory>;
+type Factory = ReturnType<typeof useFactory>;

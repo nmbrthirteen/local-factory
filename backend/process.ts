@@ -8,9 +8,9 @@ export const pickEnv = (keys: string[]): Env =>
 
 export const safeEnv = () => pickEnv(['PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'SYSTEMROOT']);
 
-export const firstLine = (text: string) => text.split('\n').find(line => line.trim())?.trim() ?? '';
+const firstLine = (text: string) => text.split('\n').find(line => line.trim())?.trim() ?? '';
 
-export class CommandError extends Error {
+class CommandError extends Error {
   readonly exitCode: number | null;
   readonly stdout: string;
   readonly stderr: string;

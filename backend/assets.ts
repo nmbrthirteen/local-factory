@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 const immutable = 'public, max-age=31536000, immutable';
 
-export const securityHeaders = {
+const securityHeaders = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
 };

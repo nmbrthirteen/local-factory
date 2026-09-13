@@ -1,4 +1,4 @@
-export type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'context'; text: string; oldLine?: number; newLine?: number };
+type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'context'; text: string; oldLine?: number; newLine?: number };
 export type DiffFile = { path: string; from: string; state: 'modified' | 'renamed' | 'added' | 'deleted'; additions: number; deletions: number; binary?: boolean; lines: DiffLine[] };
 
 const fileHeader = /^diff --git a\/(.*) b\/(.*)$/;

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import type { AgentModel, AgentProbe, QuestionOption } from '../../shared/types';
 import { run, safeEnv, stopProcessGroup } from '../process';
 
-export const supportedOpencodeVersion = '1.18.30';
-export const opencodePermissions = { edit: 'allow', bash: 'allow', webfetch: 'deny', websearch: 'deny', external_directory: 'ask', doom_loop: 'ask' };
+const supportedOpencodeVersion = '1.18.30';
+const opencodePermissions = { edit: 'allow', bash: 'allow', webfetch: 'deny', websearch: 'deny', external_directory: 'ask', doom_loop: 'ask' };
 
 const binary = join(import.meta.dir, '../../node_modules/.bin/opencode');
 const startTimeoutMs = 20_000;
@@ -29,7 +29,7 @@ export type OpencodeEvent =
   | { type: 'question'; id: string; questions: { question: string; options?: QuestionOption[] }[] }
   | { type: 'idle'; error: string | null; costUsd: number; turns: number };
 
-export type OpencodePolicy = { version: string; directory: string; shell: string; permission?: unknown; writable?: string[] };
+type OpencodePolicy = { version: string; directory: string; shell: string; permission?: unknown; writable?: string[] };
 
 export type OpencodeSession = {
   pid?: number;
@@ -49,7 +49,7 @@ type Providers = { connected: string[]; default: Record<string, string>; all: { 
 type Sandbox = { shell: string; configHome: string; worktree: string; writable: string[] };
 type RawEvent = { type: string; properties?: Record<string, any> };
 
-export async function opencodeVersion() {
+async function opencodeVersion() {
   const version = (await run([binary, '--version'], { timeoutMs: 10_000 })).trim();
   if (version !== supportedOpencodeVersion) throw new Error(`OpenCode ${version} is installed; this adapter supports ${supportedOpencodeVersion}. Run bun install to restore the pinned version.`);
   return version;

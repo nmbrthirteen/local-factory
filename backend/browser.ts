@@ -157,7 +157,7 @@ export const previewTools = {
   },
 };
 
-export type PreviewToolName = keyof typeof previewTools;
+type PreviewToolName = keyof typeof previewTools;
 
 export async function runPreviewTool(session: PreviewSession, name: string, input: unknown): Promise<ToolResult> {
   const tool = previewTools[name as PreviewToolName];

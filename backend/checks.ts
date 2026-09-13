@@ -7,8 +7,6 @@ const commandsThatCannotFail = ['true', ':', 'echo', 'printf', 'exit'];
 const testFile = /(^|\/)tests?\/.+\.[cm]?js$|\.test\.[cm]?js$/;
 const outputTail = 4000;
 
-export const checkSourceNotes: Record<CheckSource, string> = { owner: '', agent: ' chosen by the agent', detected: ' found in the repository' };
-
 export function namedCheck(message = '') {
   const named = [...message.matchAll(/^CHECK:\s*`?([^`\n]+?)`?\s*$/gm)].at(-1);
   const command = named ? parseCommand(named[1]) : [];

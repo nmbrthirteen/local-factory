@@ -5,7 +5,7 @@ import { popIn } from '@/lib/motion';
 import { usePopover } from '@/lib/usePopover';
 import { cn } from '@/lib/utils';
 
-export type MenuOption<T extends string = string> = { value: T; name: string; description?: string; tag?: string };
+type MenuOption<T extends string = string> = { value: T; name: string; description?: string; tag?: string };
 
 export const popoverClass = 'absolute top-full z-30 mt-2 rounded-[10px] bg-surface p-1 shadow-raised';
 export const menuHighlight = 'inset-x-0 rounded-[6px] bg-hover';

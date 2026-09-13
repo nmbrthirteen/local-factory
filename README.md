@@ -1,4 +1,10 @@
-# Local Factory
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/logo-light.svg">
+    <img alt="Local Factory" src="docs/images/logo-light.svg" width="320" height="64">
+  </picture>
+</h1>
 
 Run coding agents on your repos and merge only what passed a check.
 

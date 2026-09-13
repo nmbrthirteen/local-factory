@@ -1,4 +1,5 @@
 import type { TaskStatus } from '@shared/domain';
+import { logoPath, logoTheme } from './logo';
 
 export type NotifyMode = 'both' | 'banner' | 'sound' | 'off';
 type TaskStatusLike = { id: string; status: TaskStatus; settled?: boolean | null };
@@ -55,7 +56,7 @@ export function without(set: ReadonlySet<string>, id: string | null) {
 export function faviconHref(count: number) {
   if (!count) return '/favicon.svg';
   const label = count > 9 ? '9+' : String(count);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#226957"/><path d="M7 24V14l5 3v-3l5 3v-3l5 3V8h3v16z" fill="#fbfcfa"/><circle cx="23" cy="9" r="9" fill="${badgeColor}"/><text x="23" y="13" font-family="system-ui,sans-serif" font-size="${label.length > 1 ? 9 : 12}" font-weight="700" text-anchor="middle" fill="#fff">${label}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><style>${logoTheme}</style><path d="${logoPath}" fill="currentColor"/><circle cx="27" cy="9" r="9" fill="${badgeColor}"/><text x="27" y="13" font-family="system-ui,sans-serif" font-size="${label.length > 1 ? 9 : 12}" font-weight="700" text-anchor="middle" fill="#fff">${label}</text></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 

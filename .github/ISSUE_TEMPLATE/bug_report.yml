@@ -1,0 +1,36 @@
+name: Bug report
+description: Something didn't work the way the docs say it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options:
+        - Codex
+        - Claude
+        - OpenCode
+        - Not agent related
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: macOS, `bun --version`, and `codex --version`
+      placeholder: macOS 26.1, bun 1.2.10, codex-cli 0.154.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant part of the task's activity download or `.factory/service.log`. Remove anything private first.
+      render: text

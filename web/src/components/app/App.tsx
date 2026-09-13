@@ -5,9 +5,12 @@ import { Button } from '@/components/atoms/Button';
 import { Icon } from '@/components/atoms/Icon';
 import { api } from '@/lib/live';
 import { popIn } from '@/lib/motion';
-import type { TaskHandlers } from '@/lib/taskControls';
-import { checkSummary, groupTasks, repoName, taskGroup } from '@/lib/tasks';
+import { askForBanners } from '@/lib/notifications';
+import type { PaletteItem } from '@/lib/palette';
+import { taskControls, type TaskHandlers } from '@/lib/taskControls';
+import { checkSummary, groupTasks, repoName, taskGroup, taskState } from '@/lib/tasks';
 import { useFactory } from '@/lib/useFactory';
+import CommandPalette from './CommandPalette';
 import { useConfirm } from './ConfirmProvider';
 import ConnectRepo, { AddRepositoryModal } from './ConnectRepo';
 import NewTask from './NewTask';
@@ -47,6 +50,7 @@ export default function App() {
   // New task opens on its own while every task is settled, until the owner cancels it.
   const [newWhenSettled, setNewWhenSettled] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [palette, setPalette] = useState(false);
   const [showList, setShowList] = useState(!selected);
   const search = useRef<HTMLInputElement>(null);
 
@@ -60,12 +64,21 @@ export default function App() {
     select(id);
   };
 
+  const focusSearch = () => {
+    setShowList(true);
+    search.current?.focus();
+  };
+
   const onKey = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey) && !event.altKey && state?.repository) {
+      event.preventDefault();
+      setPalette(open => !open);
+      return;
+    }
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]') || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === '/') {
       event.preventDefault();
-      setShowList(true);
-      search.current?.focus();
+      focusSearch();
     } else if (event.key.toLowerCase() === 'n' && state?.repository) {
       event.preventDefault();
       openNew();
@@ -167,7 +180,7 @@ export default function App() {
   };
 
   const createTask = (body: Record<string, unknown>) => {
-    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    askForBanners();
     act(async () => {
       const task = await api<Task>('/tasks', body);
       setCreating(false);
@@ -184,9 +197,25 @@ export default function App() {
     select(null);
   });
 
+  const paletteItems: PaletteItem[] = [
+    { id: 'new-task', group: 'Actions', label: 'New task', detail: 'N', keywords: 'create start', run: openNew },
+    { id: 'search', group: 'Actions', label: 'Search tasks', detail: '/', keywords: 'find filter', run: focusSearch },
+    { id: 'add-repository', group: 'Actions', label: 'Add repository', keywords: 'connect folder project', run: () => setConnecting(true) },
+    ...(detail
+      ? Object.entries(taskControls(detail.task, locked, busy, handlersFor(detail.task)))
+          .filter(([, control]) => control && !control.disabled)
+          .map(([id, control]) => ({ id: `control-${id}`, group: 'This task', label: control.label, detail: detail.task.title, run: control.run }))
+      : []),
+    ...state.tasks.map(task => ({ id: `task-${task.id}`, group: 'Tasks', label: task.title, detail: taskState(task).label, run: () => open(task.id) })),
+    ...state.repositories
+      .filter(repo => repo.path !== repository.path)
+      .map(repo => ({ id: `repository-${repo.path}`, group: 'Repositories', label: `Switch to ${repoName(repo.path)}`, detail: repo.path, run: () => switchRepository(repo.path) })),
+  ];
+
   return (
     <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
       {toast}
+      <CommandPalette open={palette} items={paletteItems} onClose={() => setPalette(false)} />
       <AddRepositoryModal open={connecting} busy={busy} onClose={() => setConnecting(false)} onConnect={path => connectRepository(path).then(ok => ok && setConnecting(false))} />
       <div className={`flex h-full max-md:w-full ${showList ? '' : 'max-md:hidden'}`}>
         <Sidebar

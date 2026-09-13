@@ -5,11 +5,13 @@ import { Button } from '@/components/atoms/Button';
 import { Collapse } from '@/components/atoms/Collapse';
 import { Chevron } from '@/components/atoms/Icon';
 import { fadeUp } from '@/lib/motion';
+import { usePromptHistory } from '@/lib/promptHistory';
 import { agents, autonomyModes, parseCommand, repoName } from '@/lib/tasks';
 import type { AgentState } from '@/lib/useFactory';
 import Menu from './Menu';
 
 const draftKey = 'factory-task-draft';
+const historyKey = 'factory-task-history';
 const minHeightPx = 132;
 const maxHeightPx = 360;
 const field = 'h-9 w-full rounded-[8px] bg-field px-2.5 text-[13px] text-ink shadow-hairline outline-none transition-shadow placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]';
@@ -46,7 +48,8 @@ type NewTaskProps = {
 };
 
 export default function NewTask({ agent, busy, repository, repositories, onAgent, onReprobe, onCancel, onCreate }: NewTaskProps) {
-  const [draft, setDraft] = useState(() => sessionStorage.getItem(draftKey) ?? '');
+  const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? '');
+  const history = usePromptHistory(historyKey);
   const [target, setTarget] = useState(repository.path);
   const [model, setModel] = useState('');
   const [autonomy, setAutonomy] = useState<Autonomy>('ask');
@@ -56,7 +59,7 @@ export default function NewTask({ agent, busy, repository, repositories, onAgent
   const models = agent.probe?.harness === agent.harness ? agent.probe.models : [];
 
   useEffect(() => input.current?.focus(), []);
-  useEffect(() => sessionStorage.setItem(draftKey, draft), [draft]);
+  useEffect(() => localStorage.setItem(draftKey, draft), [draft]);
   useEffect(() => {
     if (models.length && !models.some(option => option.id === model)) setModel((models.find(option => option.isDefault) ?? models[0]).id);
   }, [models, model]);
@@ -71,7 +74,8 @@ export default function NewTask({ agent, busy, repository, repositories, onAgent
   const submit = () => {
     if (!ready) return;
     onCreate({ criteria: draft, repository: target, model, autonomy, harness: agent.harness, title: options.title, setup: parseCommand(options.setup), check: parseCommand(options.check) });
-    sessionStorage.removeItem(draftKey);
+    history.record(draft);
+    localStorage.removeItem(draftKey);
   };
 
   return (
@@ -106,7 +110,8 @@ export default function NewTask({ agent, busy, repository, repositories, onAgent
             value={draft}
             maxLength={10_000}
             onChange={event => setDraft(event.target.value)}
-            placeholder="Describe the change and what success looks like."
+            onKeyDown={event => history.recall(event, draft, setDraft)}
+            placeholder={history.hasHistory() ? 'Describe the change and what success looks like. Press ↑ for earlier tasks.' : 'Describe the change and what success looks like.'}
             className="w-full resize-none bg-transparent px-2 py-1.5 text-[14px] leading-6 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3"
           />
           <div className="flex flex-wrap items-center gap-1">

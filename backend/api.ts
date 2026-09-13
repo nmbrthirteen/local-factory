@@ -60,20 +60,24 @@ function changeStream(store: Store, request: Request) {
   let release = () => {};
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = (event: string) => {
-        if ((controller.desiredSize ?? 0) > 0) return controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
+      const send = (event: string, data: unknown = {}) => {
+        if ((controller.desiredSize ?? 0) > 0) return controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
         release();
         controller.close();
       };
       const change = () => send('change');
+      const progress = (update: unknown) => send('progress', update);
       const heartbeat = setInterval(() => send('ping'), heartbeatMs);
       release = () => {
         clearInterval(heartbeat);
         store.off('change', change);
+        store.progress.off('update', progress);
       };
       store.on('change', change);
+      store.progress.on('update', progress);
       request.signal.addEventListener('abort', release, { once: true });
       change();
+      for (const update of store.progress.current()) progress(update);
     },
     cancel: () => release(),
   }, { highWaterMark: 64 });

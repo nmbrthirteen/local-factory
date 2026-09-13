@@ -19,6 +19,7 @@ import { validAutonomy } from './validation';
 const maxAttempts = 3;
 const probeTtlMs = 60_000;
 const outputLimit = 12_000;
+const execOutputBytes = 24_000;
 const setupTimeoutMs = 600_000;
 const checkTimeoutMs = 120_000;
 const retryNote = 'The check failed. Read its output, fix the cause, and keep every test passing.';
@@ -42,6 +43,7 @@ export type Run = {
   pending: Map<string, PendingRequest>;
   turn: Promise<TurnResult>;
   finishTurn: (result: TurnResult) => void;
+  execOutput?: { stdout: string; stderr: string; decoders: Record<'stdout' | 'stderr', TextDecoder> };
   done?: Promise<void>;
   canceled: boolean;
   cancelReason?: string;
@@ -470,10 +472,29 @@ export class Runner {
         this.store.update(run.id, { turnId: run.turnId });
         break;
       case 'item/started':
-        if (params.item.type === 'commandExecution') this.store.event(run.id, 'tool_started', params.item.command, { toolId: params.item.id });
+        if (params.item.type === 'commandExecution') {
+          this.store.event(run.id, 'tool_started', params.item.command, { toolId: params.item.id });
+          this.store.progress.set(run.id, params.item.id, 'output', '', params.item.command);
+        }
         if (params.item.type === 'dynamicToolCall') this.store.event(run.id, 'tool_started', toolLabel(params.item.tool, params.item.arguments), { tool: params.item.tool, toolId: params.item.id });
         break;
+      case 'item/commandExecution/outputDelta':
+        this.store.progress.append(run.id, params.itemId, 'output', params.delta);
+        break;
+      case 'item/agentMessage/delta':
+        this.store.progress.append(run.id, params.itemId, 'message', params.delta);
+        break;
+      case 'command/exec/outputDelta': {
+        const output = run.execOutput;
+        if (!output || params.processId !== run.processId) break;
+        const stream: 'stdout' | 'stderr' = params.stream === 'stderr' ? 'stderr' : 'stdout';
+        const text = output.decoders[stream].decode(Buffer.from(params.deltaBase64, 'base64'), { stream: true });
+        output[stream] = (output[stream] + text).slice(-execOutputBytes);
+        this.store.progress.append(run.id, params.processId, 'output', text);
+        break;
+      }
       case 'item/completed':
+        this.store.progress.end(run.id, params.item.id);
         this.recordCodexItem(run, params.item);
         break;
       case 'serverRequest/resolved':
@@ -519,7 +540,11 @@ export class Runner {
         run.finishTurn(failure('Claude did not apply the requested run policy'));
         return true;
       }
+    } else if (message.type === 'stream_event') {
+      const { event } = message;
+      if (!message.parent_tool_use_id && event.type === 'content_block_delta' && event.delta.type === 'text_delta') this.store.progress.append(run.id, `text-${event.index}`, 'message', event.delta.text);
     } else if (message.type === 'assistant') {
+      this.store.progress.end(run.id);
       for (const block of message.message.content) {
         if (block.type === 'text' && block.text.trim()) this.recordMessage(run, block.text);
         if (block.type === 'tool_use') {
@@ -587,7 +612,11 @@ export class Runner {
 
   private handleOpencodeEvent(run: Run, session: OpencodeSession, event: OpencodeEvent) {
     switch (event.type) {
+      case 'draft':
+        this.store.progress.set(run.id, event.key, 'message', event.text);
+        return false;
       case 'message':
+        this.store.progress.end(run.id);
         this.recordMessage(run, event.text);
         return false;
       case 'tool_started':
@@ -680,11 +709,21 @@ export class Runner {
     const cache = join(this.root, '.factory/cache');
     const tmp = join(cache, 'tmp', run.id);
     await mkdir(tmp, { recursive: true });
-    run.processId = `${kind}-${run.id}`;
+    const processId = `${kind}-${run.id}`;
+    run.processId = processId;
+    const output = { stdout: '', stderr: '', decoders: { stdout: new TextDecoder(), stderr: new TextDecoder() } };
+    run.execOutput = output;
+    this.store.progress.set(run.id, processId, 'output', '', command.join(' '));
     const startedAt = Date.now();
-    const result = await run.client.request('command/exec', { command, cwd, sandboxPolicy: sandbox(cwd, { roots: [cache], network }), env: toolEnv(cache, tmp), timeoutMs, outputBytesCap: 24_000, processId: run.processId }, timeoutMs + 10_000);
-    run.processId = null;
-    return { command, network, ...result, startedAt: new Date(startedAt).toISOString(), durationMs: Date.now() - startedAt };
+    try {
+      // Streamed output is left out of the final response, so the result is rebuilt from the deltas.
+      const result = await run.client.request('command/exec', { command, cwd, sandboxPolicy: sandbox(cwd, { roots: [cache], network }), env: toolEnv(cache, tmp), timeoutMs, outputBytesCap: execOutputBytes, processId, streamStdoutStderr: true }, timeoutMs + 10_000);
+      return { command, network, ...result, stdout: `${result.stdout ?? ''}${output.stdout}`, stderr: `${result.stderr ?? ''}${output.stderr}`, startedAt: new Date(startedAt).toISOString(), durationMs: Date.now() - startedAt };
+    } finally {
+      run.processId = null;
+      run.execOutput = undefined;
+      this.store.progress.end(run.id, processId);
+    }
   }
 
   private async verify(run: Run, task: Task, worktree: Worktree) {
@@ -743,6 +782,7 @@ export class Runner {
   private async finish(run: Run) {
     const { id } = run;
     if (run.timer) clearTimeout(run.timer);
+    this.store.progress.end(id);
     await run.preview?.close();
     run.agent?.close();
     run.client.close();

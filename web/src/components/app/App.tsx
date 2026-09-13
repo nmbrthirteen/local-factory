@@ -262,7 +262,7 @@ export default function App() {
             onCreate={createTask}
           />
         ) : detail ? (
-          <TaskView key={detail.task.id} task={detail.task} events={detail.events} locked={locked} busy={busy} handlersFor={handlersFor} onBack={() => setShowList(true)} />
+          <TaskView key={detail.task.id} task={detail.task} events={detail.events} progress={factory.progress} locked={locked} busy={busy} handlersFor={handlersFor} onBack={() => setShowList(true)} />
         ) : selected ? (
           <Pending className="flex-1">Loading task</Pending>
         ) : (

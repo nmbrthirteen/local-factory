@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TaskStatus } from '@shared/domain';
-import type { AgentProbe, FactoryState, Task, TaskEvent } from '@shared/types';
+import { isActive, type TaskStatus } from '@shared/domain';
+import type { AgentProbe, FactoryState, ProgressEvent, ProgressUpdate, Task, TaskEvent } from '@shared/types';
 import { api, connectLive } from './live';
 import { arrivals, chime, readNotifyMode, showBadge, unseenAfter, wantsBanner, wantsSound, without } from './notifications';
 import { mergeEvents, refreshQueue } from './sync';
@@ -29,6 +29,7 @@ export function useFactory() {
   const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState<AgentState>({ harness: '', probe: null, error: '' });
   const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
+  const [progress, setProgress] = useState<ReadonlyMap<string, ProgressUpdate>>(new Map());
   const live = useRef({ selected, query, events: [] as TaskEvent[], loadedFor: null as string | null, probing: 0, statuses: new Map<string, TaskStatus>() });
   const refreshRef = useRef<() => Promise<void>>(async () => {});
 
@@ -60,6 +61,13 @@ export function useFactory() {
       live.current.statuses = new Map([...previous, ...next.tasks.map(task => [task.id, task.status] as const)]);
       const fresh = arrivals(previous, next.tasks).filter(task => document.hidden || task.id !== live.current.selected);
       setUnseen(current => unseenAfter(current, next.tasks, fresh));
+      setProgress(current => {
+        const idle = [...current.keys()].filter(id => !isActive(live.current.statuses.get(id)));
+        if (!idle.length) return current;
+        const kept = new Map(current);
+        for (const id of idle) kept.delete(id);
+        return kept;
+      });
       if (!fresh.length) return;
       const mode = readNotifyMode();
       if (wantsSound(mode)) chime();
@@ -109,7 +117,14 @@ export function useFactory() {
       }
     });
     refreshRef.current = refresh;
-    return connectLive(refresh, setConnection);
+    const onProgress = (event: ProgressEvent) =>
+      setProgress(current => {
+        const next = new Map(current);
+        if ('cleared' in event) next.delete(event.taskId);
+        else next.set(event.taskId, event);
+        return next;
+      });
+    return connectLive(refresh, setConnection, onProgress);
   }, [select]);
 
   useEffect(() => {
@@ -180,6 +195,7 @@ export function useFactory() {
     act,
     agent,
     unseen,
+    progress: selected ? progress.get(selected) : undefined,
     chooseAgent,
     reprobe: () => probe(agent.harness),
     refresh: () => refreshRef.current(),

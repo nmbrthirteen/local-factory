@@ -62,6 +62,7 @@ export function openClaude({ query = sdkQuery, cwd, model, instructions, canUseT
       strictMcpConfig: true,
       mcpServers,
       persistSession: false,
+      includePartialMessages: true,
       permissionMode: 'acceptEdits',
       tools: claudeTools,
       sandbox: claudeSandbox,

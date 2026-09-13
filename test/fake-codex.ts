@@ -23,6 +23,9 @@ async function startTurn(input: string) {
   if (input.includes('RECORD_PROMPT')) await appendFile(`${cwd}.prompts`, `${input}\n---\n`);
   if (input.includes('Owner feedback') || input.includes('Note from the factory')) await writeFile(`${cwd}/fixed.txt`, 'fixed\n');
   if (input.includes('LARGE_DIFF')) await writeFile(`${cwd}/large.txt`, 'x'.repeat(3 * 1024 * 1024));
+  if (input.includes('LIVE_PROGRESS')) {
+    for (const delta of ['Streaming ', 'reply']) notify('item/agentMessage/delta', { threadId: 'thread-1', turnId: 'turn-1', itemId: 'msg-1', delta });
+  }
   notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: handoffFor(input) } });
   if (input.includes('PREVIEW_TOOL')) return send({ id: 'tool-call', method: 'item/tool/call', params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', tool: 'preview_logs', arguments: {} } });
   if (!input.includes('REQUEST_APPROVAL')) return complete();
@@ -70,8 +73,14 @@ createInterface({ input: process.stdin }).on('line', async line => {
     case 'turn/start':
       reply({ turn: { id: 'turn-1' } });
       return startTurn(params.input[0].text);
-    case 'command/exec':
-      return reply(await execute(params));
+    case 'command/exec': {
+      const result = await execute(params);
+      if (!params.streamStdoutStderr) return reply(result);
+      for (const stream of ['stdout', 'stderr'] as const) {
+        if (result[stream]) notify('command/exec/outputDelta', { processId: params.processId, stream, deltaBase64: Buffer.from(result[stream]).toString('base64'), capReached: false });
+      }
+      return reply({ ...result, stdout: '', stderr: '' });
+    }
     case 'turn/interrupt':
       reply({});
       return notify('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1', status: 'interrupted' } });

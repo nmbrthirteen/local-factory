@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { activeStates } from '../shared/domain';
 import type { NewTask, Task, TaskEvent } from '../shared/types';
+import { Progress } from './progress';
 import { statusIn, taskPage, type TaskPageOptions } from './task-list';
 
 export const eventPageSize = 200;
@@ -18,6 +19,7 @@ const toEvent = (row: EventRow): TaskEvent => ({ ...JSON.parse(row.data), id: ro
 
 export class Store extends EventEmitter {
   readonly db: Database;
+  readonly progress = new Progress();
   private notifying = false;
 
   constructor(path: string) {

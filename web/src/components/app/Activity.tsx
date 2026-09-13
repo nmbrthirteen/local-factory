@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isActive, isWorking } from '@shared/domain';
-import type { Task, TaskEvent } from '@shared/types';
+import type { ProgressUpdate, Task, TaskEvent } from '@shared/types';
 import { Button } from '@/components/atoms/Button';
 import { Collapse } from '@/components/atoms/Collapse';
 import { Chevron, Icon } from '@/components/atoms/Icon';
@@ -8,6 +8,7 @@ import { StreamText } from '@/components/atoms/StreamText';
 import LoadingState from '@/components/primitives/LoadingState';
 import { buildActivity, taskActions, taskState, toolSummary, type EventEntry, type MessageEntry, type ToolEntry, type ToolGroupStep } from '@/lib/tasks';
 import CommandPanel from './CommandPanel';
+import LiveProgress from './LiveProgress';
 import Markdown from './Markdown';
 import Requests from './Requests';
 import Screenshot from './Screenshot';
@@ -154,6 +155,7 @@ function FollowUp({ task, busy, locked, onRetry }: { task: Task; busy: boolean; 
 type ActivityProps = {
   task: Task;
   events: TaskEvent[];
+  progress?: ProgressUpdate;
   verbosity: string;
   locked: boolean;
   busy: boolean;
@@ -163,7 +165,7 @@ type ActivityProps = {
   onStopShell?: () => void;
 };
 
-export default function Activity({ task, events, verbosity, locked, busy, onAnswer, onRetry, onRunShell, onStopShell }: ActivityProps) {
+export default function Activity({ task, events, progress, verbosity, locked, busy, onAnswer, onRetry, onRunShell, onStopShell }: ActivityProps) {
   const live = isActive(task.status);
   const steps = useMemo(() => buildActivity(events, { worktree: task.worktree?.path, live, verbosity }), [events, task.worktree?.path, live, verbosity]);
   const compact = useCompact();
@@ -178,7 +180,7 @@ export default function Activity({ task, events, verbosity, locked, busy, onAnsw
   const stick = () => {
     if (following && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   };
-  useLayoutEffect(stick, [lastId, following, requests.length, task.status]);
+  useLayoutEffect(stick, [lastId, following, requests.length, task.status, progress?.text]);
 
   const ownerCommand = task.ownerCommand;
   const runCommand = live ? undefined : onRunShell;
@@ -213,6 +215,7 @@ export default function Activity({ task, events, verbosity, locked, busy, onAnsw
             if (step.kind === 'tools') return <ToolGroup key={step.id} step={step} latest={live && step.id === lastGroup} />;
             return <EventRow key={step.id} step={step} taskId={task.id} />;
           })}
+          {live && progress && <LiveProgress progress={progress} />}
           {isWorking(task.status) && <LoadingState label={taskState(task).label} since={task.startedAt} />}
         </div>
         {compact && dock}

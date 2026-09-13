@@ -1,3 +1,5 @@
+import type { ProgressEvent } from '@shared/types';
+
 const reconnectDelayMs = 1500;
 const staleAfterMs = 30_000;
 const fallbackRefreshMs = 15_000;
@@ -10,7 +12,7 @@ export async function api<T = unknown>(path: string, body?: unknown, timeoutMs =
   return result;
 }
 
-export function connectLive(refresh: () => unknown, status: (status: string) => void) {
+export function connectLive(refresh: () => unknown, status: (status: string) => void, onProgress?: (event: ProgressEvent) => void) {
   let stream: EventSource | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -48,6 +50,10 @@ export function connectLive(refresh: () => unknown, status: (status: string) => 
       stream.addEventListener('change', () => {
         heartbeat();
         refresh();
+      });
+      stream.addEventListener('progress', event => {
+        heartbeat();
+        onProgress?.(JSON.parse((event as MessageEvent<string>).data));
       });
       stream.addEventListener('ping', heartbeat);
       stream.onerror = reconnect;

@@ -195,6 +195,31 @@ try {
   await waitFor('!document.querySelector("dialog[open]")');
   console.log('Screenshots the agent takes show in Activity and open full size in a modal that Close dismisses.');
 
+  await browser('click', `[data-task="${task.id}"]`);
+  await waitFor('document.querySelector("#task-heading")?.textContent === "Verify activity updates"');
+  store.progress.set(task.id, 'check-1', 'output', 'first line\n', 'npm test');
+  store.progress.append(task.id, 'check-1', 'output', '[32mpassing[0m line\n');
+  await waitFor('document.querySelector("#live-progress")?.textContent.includes("passing line")');
+  assert.equal(await evaluate('["npm test", "first line"].every(text => document.querySelector("#live-progress").textContent.includes(text)) && !document.querySelector("#live-progress").textContent.includes("[32m")'), true);
+  assert.equal(store.events(task.id).some(event => event.text.includes('passing line')), false);
+  store.progress.end(task.id);
+  await waitFor('!document.querySelector("#live-progress")');
+  console.log('Streaming command output shows in Activity without color codes and clears when the command ends.');
+
+  await evaluate('document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true })); true');
+  await waitFor('document.querySelector("dialog[open] #palette-input")');
+  await browser('fill', '#palette-input', 'merged');
+  await waitFor('document.querySelector("[role=option][aria-selected=true]")?.textContent.includes("Merged work")');
+  await browser('press', 'Enter');
+  await waitFor('document.querySelector("#task-heading")?.textContent === "Merged work" && !document.querySelector("dialog[open]")');
+  console.log('Cmd+K opens the palette, filters tasks, and Enter opens the chosen one.');
+
+  assert.equal(await evaluate('/^\\(\\d+\\) Local Factory$/.test(document.title) && document.querySelector("link[rel=icon]").href.startsWith("data:image/svg+xml")'), true);
+  await browser('click', '#notifications');
+  await evaluate('[...document.querySelectorAll("[role=menuitemradio]")].find(node => node.textContent.startsWith("Off")).click(); true');
+  await waitFor('document.querySelector("#notifications")?.getAttribute("aria-label") === "Notifications: Off" && !document.querySelector("[role=menu]")');
+  console.log('The tab shows a count and badge while a task needs you, and the bell menu switches notifications off.');
+
   for (const item of store.list()) if (!item.merge) store.update(item.id, { status: 'canceled', requests: [], settled: true });
   await browser('open', base);
   await waitFor('document.querySelector("#task-form") && !document.querySelector("#task-heading")');

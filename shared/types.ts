@@ -132,6 +132,10 @@ export type TaskPage = { tasks: TaskSummary[]; page: { counts: Record<string, nu
 export type AgentModel = { id: string; name: string; isDefault?: boolean };
 export type AgentProbe = { harness: Harness; version: string; authenticated: boolean; account?: string; models: AgentModel[]; recovery?: string[] };
 
+export type ProgressKind = 'output' | 'message';
+export type ProgressUpdate = { taskId: string; key: string; kind: ProgressKind; label: string; text: string };
+export type ProgressEvent = ProgressUpdate | { taskId: string; cleared: true };
+
 export type FactoryState = TaskPage & {
   repository: Repository | null;
   repositories: Repository[];

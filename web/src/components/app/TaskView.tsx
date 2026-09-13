@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useState, type KeyboardEvent } from 'react';
-import type { Task, TaskEvent, TaskLike } from '@shared/types';
+import type { ProgressUpdate, Task, TaskEvent, TaskLike } from '@shared/types';
 import { Button } from '@/components/atoms/Button';
 import { Icon } from '@/components/atoms/Icon';
 import { taskControls, type Control, type TaskHandlers } from '@/lib/taskControls';
@@ -25,9 +25,9 @@ function HeaderButton({ control, variant }: { control?: Control; variant: 'prima
   return <Button id={control.elementId} variant={variant} size="sm" disabled={control.disabled} onClick={control.run} title={control.hint}>{control.label}</Button>;
 }
 
-type TaskViewProps = { task: Task; events: TaskEvent[]; locked: boolean; busy: boolean; handlersFor: (task: TaskLike) => TaskHandlers; onBack: () => void };
+type TaskViewProps = { task: Task; events: TaskEvent[]; progress?: ProgressUpdate; locked: boolean; busy: boolean; handlersFor: (task: TaskLike) => TaskHandlers; onBack: () => void };
 
-export default function TaskView({ task, events, locked, busy, handlersFor, onBack }: TaskViewProps) {
+export default function TaskView({ task, events, progress, locked, busy, handlersFor, onBack }: TaskViewProps) {
   const handlers = handlersFor(task);
   const [view, setView] = useState<View>('activity');
   const [verbosity, setVerbosity] = useStoredState('factory-activity', 'summary');
@@ -110,7 +110,7 @@ export default function TaskView({ task, events, locked, busy, handlersFor, onBa
           )}
         </div>
       </header>
-      {view === 'activity' && <Activity key={task.id} task={task} events={events} verbosity={verbosity} locked={locked} busy={busy} onAnswer={handlers.answer} onRetry={handlers.retry} onRunShell={handlers.runShell} onStopShell={handlers.stopShell} />}
+      {view === 'activity' && <Activity key={task.id} task={task} events={events} progress={progress} verbosity={verbosity} locked={locked} busy={busy} onAnswer={handlers.answer} onRetry={handlers.retry} onRunShell={handlers.runShell} onStopShell={handlers.stopShell} />}
       {view === 'changes' && <Changes task={task} />}
       {view === 'preview' && <Preview task={task} busy={busy} locked={locked} onRetake={handlers.preview} onStartApp={handlers.startApp} onStopApp={handlers.stopApp} />}
       {view === 'details' && <Details task={task} busy={busy} locked={locked} onRollback={handlers.rollback} onRemove={handlers.remove} />}

@@ -23,6 +23,7 @@ const isolationEnv = {
 
 export type OpencodeEvent =
   | { type: 'message'; text: string }
+  | { type: 'draft'; key: string; text: string }
   | { type: 'tool_started'; toolId?: string; tool: string; text: string }
   | { type: 'tool_result'; toolId?: string; tool: string; error: boolean; output: unknown }
   | { type: 'permission'; id: string; permission: string; patterns: string[]; metadata: unknown }
@@ -174,6 +175,8 @@ async function* normalize(events: AsyncIterable<RawEvent>, sessionID: string, st
       if (part.type === 'text' && part.time?.end && !part.synthetic && !finishedText.has(part.id)) {
         finishedText.add(part.id);
         if (part.text.trim()) yield { type: 'message', text: part.text };
+      } else if (part.type === 'text' && !part.time?.end && !part.synthetic && part.text) {
+        yield { type: 'draft', key: part.id, text: part.text };
       }
       if (part.type === 'tool' && toolStatus.get(part.callID) !== part.state.status) {
         toolStatus.set(part.callID, part.state.status);

@@ -45,7 +45,6 @@ Open http://localhost:4310 and connect a repository.
 
 ## Limits
 
-- One task at a time
 - macOS only
 - Codex is required, since setup and checks run in its sandbox
 

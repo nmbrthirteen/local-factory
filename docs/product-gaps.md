@@ -1,6 +1,6 @@
 # Status
 
-Local Factory works for one person running one task at a time on macOS. `bun run test` covers the backend against real Git with fake agents, and `test/browser.ts` covers the interface.
+Local Factory works for one person on macOS, with as many tasks running at once as the machine takes. `bun run test` covers the backend against real Git with fake agents, and `test/browser.ts` covers the interface.
 
 ## Built
 
@@ -10,6 +10,9 @@ Local Factory works for one person running one task at a time on macOS. `bun run
 - Screenshots, a running app to try, and preview tools for agents
 - Merge, pull requests, revert, rollback, another attempt
 - Run buttons for commands in agent messages
+- Parallel runs, each in its own worktree
+- Images attached to a task, passed to every agent
+- Ollama models through the OpenCode harness
 - Search, notifications, command palette, recovery after restart
 
 ## Partial
@@ -24,9 +27,7 @@ Local Factory works for one person running one task at a time on macOS. `bun run
 
 - Independent reviewer and repair loop
 - Patch download and disk usage reporting
-- Parallel tasks
 - Linux and Windows
-- Local models
 - Schedules, webhooks, reusable recipes
 - Remote and team use
 

@@ -50,11 +50,20 @@ export async function inspectRepo(path: unknown): Promise<Repository> {
   return { path: root, base, dirty: Boolean(status), remote, recipe };
 }
 
+const repoQueues = new Map<string, Promise<unknown>>();
+
+// Parallel runs share one repository, and Git writes its worktree list and refs without locking them against each other.
+function onRepo<T>(repoPath: string, work: () => Promise<T>): Promise<T> {
+  const next = (repoQueues.get(repoPath) ?? Promise.resolve()).then(work, work);
+  repoQueues.set(repoPath, next.catch(() => undefined));
+  return next;
+}
+
 export async function createWorktree(repo: Repository, directory: string, id: string): Promise<Worktree> {
   const parent = join(directory, basename(repo.path));
   await mkdir(parent, { recursive: true });
   const worktree = { path: join(parent, id), branch: `factory/${id}` };
-  await git(repo.path, ['worktree', 'add', '-b', worktree.branch, worktree.path, repo.base]);
+  await onRepo(repo.path, () => git(repo.path, ['worktree', 'add', '-b', worktree.branch, worktree.path, repo.base]));
   return worktree;
 }
 
@@ -105,9 +114,11 @@ export async function undoLastCommit(path: string, sha: string) {
   await git(path, ['reset', '--soft', 'HEAD~1']);
 }
 
-export async function deleteWorktree(repoPath: string, worktree: Worktree, keepBranch: boolean) {
-  await git(repoPath, ['worktree', 'remove', '--force', worktree.path]);
-  if (!keepBranch) await git(repoPath, ['branch', '-D', worktree.branch]);
+export function deleteWorktree(repoPath: string, worktree: Worktree, keepBranch: boolean) {
+  return onRepo(repoPath, async () => {
+    await git(repoPath, ['worktree', 'remove', '--force', worktree.path]);
+    if (!keepBranch) await git(repoPath, ['branch', '-D', worktree.branch]);
+  });
 }
 
 export async function exportPatch(path: string, base: string, file: string) {

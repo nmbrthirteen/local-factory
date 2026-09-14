@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
 import type { ApiServices } from '../backend/api';
 import { Store } from '../backend/store';
 import type { TaskEvent } from '../shared/types';
@@ -11,7 +12,7 @@ type TaskDetail = { events: TaskEvent[]; hasMore: boolean };
 
 test('authenticated event stream wakes clients, replays persisted events, and releases subscriptions', async () => {
   const store = new Store(':memory:');
-  const { server, base } = serveApi({ store, runner: { recovery: [], active: null } as unknown as ApiServices['runner'] });
+  const { server, base } = serveApi({ store, root: tmpdir(), runner: { recovery: [], runs: new Map() } as unknown as ApiServices['runner'] });
   onCleanup(() => {
     server.stop(true);
     store.close();

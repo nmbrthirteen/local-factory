@@ -39,17 +39,34 @@ test('failed check cannot produce a successful handoff', async () => {
   expect(result.checkResult?.exitCode).toBe(7);
 });
 
+test('two tasks run side by side in their own worktrees', async () => {
+  const f = await fixture();
+  const first = f.task();
+  const second = f.task();
+  f.runner.start(first.id);
+  f.runner.start(second.id);
+  expect(f.runner.runs.size).toBe(2);
+  await Promise.all([f.runner.runs.get(first.id)?.done, f.runner.runs.get(second.id)?.done]);
+  const one = f.store.require(first.id);
+  const two = f.store.require(second.id);
+  expect([one.status, two.status]).toEqual(['handoff', 'handoff']);
+  expect(one.worktree?.path).not.toBe(two.worktree?.path);
+  expect(one.checkResult?.exitCode).toBe(0);
+  expect(two.checkResult?.exitCode).toBe(0);
+  expect(f.runner.runs.size).toBe(0);
+});
+
 test('cancel and duplicate start preserve a single attempt', async () => {
   const f = await fixture();
   const task = f.task('WAIT_FOREVER');
   f.runner.start(task.id);
-  expect(() => f.runner.start(task.id)).toThrow(/active/);
+  expect(() => f.runner.start(task.id)).toThrow(/already running/);
   await until(() => f.store.require(task.id).turnId);
-  const done = f.runner.active?.done;
+  const done = f.runner.runs.get(task.id)?.done;
   f.runner.cancel(task.id);
   await done;
   expect(f.store.require(task.id).status).toBe('canceled');
-  expect(f.runner.active).toBeNull();
+  expect(f.runner.runs.size).toBe(0);
 });
 
 test('approval remains bound to its request and rejects replay', async () => {
@@ -61,7 +78,7 @@ test('approval remains bound to its request and rejects replay', async () => {
   expect(f.store.require(task.id).requests?.[0].id).toBe('001');
   f.runner.answer(task.id, '001', { decision: 'decline' });
   expect(() => f.runner.answer(task.id, '001', { decision: 'accept' })).toThrow(/no longer active/);
-  await f.runner.active?.done;
+  await f.runner.runs.get(task.id)?.done;
   expect(f.store.require(task.id).status).toBe('handoff');
 });
 
@@ -159,7 +176,7 @@ test('claude approvals and questions go to the owner and reject replay', async (
   await until(() => f.store.require(task.id).requests?.[0]?.kind === 'question');
   expect(() => f.runner.answer(task.id, 'tool-2', { answers: {} })).toThrow(/Answer each question/);
   f.runner.answer(task.id, 'tool-2', { answers: { 0: 'implemented' } });
-  await f.runner.active?.done;
+  await f.runner.runs.get(task.id)?.done;
   expect(claude.calls.decision.behavior).toBe('deny');
   expect(claude.calls.answer.updatedInput.answers).toEqual({ 'Which output?': 'implemented' });
   expect(f.store.require(task.id).status).toBe('handoff');
@@ -181,7 +198,7 @@ test('cancel stops a claude session', async () => {
   const task = f.claudeTask();
   f.runner.start(task.id);
   await until(() => f.store.require(task.id).agentPolicy);
-  const done = f.runner.active?.done;
+  const done = f.runner.runs.get(task.id)?.done;
   f.runner.cancel(task.id);
   await done;
   expect(f.store.require(task.id).status).toBe('canceled');
@@ -251,7 +268,7 @@ test('opencode permissions and questions go to the owner', async () => {
   expect(() => f.runner.answer(task.id, 'per_1', { decision: 'accept' })).toThrow(/no longer active/);
   await until(() => f.store.require(task.id).requests?.[0]?.key === 'que_1');
   f.runner.answer(task.id, 'que_1', { answers: { 0: 'implemented' } });
-  await f.runner.active?.done;
+  await f.runner.runs.get(task.id)?.done;
   expect(opencode.calls.permissionReply).toBe('reject');
   expect(opencode.calls.questionReply).toEqual([['implemented']]);
   expect(f.store.require(task.id).status).toBe('handoff');
@@ -268,7 +285,7 @@ test('opencode fails on an unavailable model and stops on cancel', async () => {
   const task = f.opencodeTask();
   f.runner.start(task.id);
   await until(() => f.store.require(task.id).status === 'running');
-  const done = f.runner.active?.done;
+  const done = f.runner.runs.get(task.id)?.done;
   f.runner.cancel(task.id);
   await done;
   expect(f.store.require(task.id).status).toBe('canceled');

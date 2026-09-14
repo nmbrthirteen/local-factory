@@ -114,7 +114,7 @@ export default function App() {
   }
 
   const repository = state.repository;
-  const locked = Boolean(state.active || state.recovery.length || busy || factory.connection !== 'Live');
+  const locked = Boolean(state.recovery.length || busy || factory.connection !== 'Live');
   const allSettled = state.tasks.every(task => taskGroup(task) === 'done');
   const showNew = creating || (newWhenSettled && !selected && allSettled && !factory.query);
 
@@ -228,12 +228,14 @@ export default function App() {
           creating={showNew}
           connection={factory.connection}
           query={factory.query}
+          scope={factory.scope}
           locked={locked}
           busy={busy}
           onQuery={factory.setQuery}
           onSelect={open}
           onNew={openNew}
           onSwitchRepository={switchRepository}
+          onScope={factory.chooseScope}
           onAddRepository={() => setConnecting(true)}
           handlersFor={handlersFor}
         />
@@ -252,7 +254,9 @@ export default function App() {
             busy={busy}
             repository={repository}
             repositories={state.repositories}
+            preferredModel={state.preferences.models[agent.harness] ?? ''}
             onAgent={factory.chooseAgent}
+            onModel={model => factory.rememberModel(agent.harness, model)}
             onReprobe={factory.reprobe}
             onCancel={() => {
               setCreating(false);

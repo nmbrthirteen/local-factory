@@ -64,3 +64,27 @@ export function stopProcessGroup(child: ChildProcess | undefined, graceMs = 1500
   signalGroup(pid, 'SIGTERM');
   setTimeout(() => signalGroup(pid, 'SIGKILL'), graceMs).unref();
 }
+
+const folderPickerScript = 'activate\nPOSIX path of (choose folder with prompt "Choose a repository folder")';
+const folderPickerTimeoutMs = 5 * 60_000;
+const cancelledPicker = -128;
+
+let picking: Promise<string | null> | undefined;
+
+export function chooseFolder() {
+  picking ??= pickFolder().finally(() => {
+    picking = undefined;
+  });
+  return picking;
+}
+
+async function pickFolder(): Promise<string | null> {
+  try {
+    // osascript owns the dialog, so `activate` is what lifts it above the browser window.
+    const chosen = await run(['osascript', '-e', folderPickerScript], { timeoutMs: folderPickerTimeoutMs });
+    return chosen.trim().replace(/(.)\/$/, '$1') || null;
+  } catch (error) {
+    if (error instanceof CommandError && error.stderr.includes(String(cancelledPicker))) return null;
+    throw new Error('Could not open the folder picker');
+  }
+}

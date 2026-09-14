@@ -14,6 +14,9 @@ type Success<T> = string | ((result: T) => string);
 
 const searchDebounceMs = 180;
 const noticeMs = 5000;
+const scopeKey = 'factory-task-scope';
+
+export type Scope = 'repository' | 'all';
 
 const hashTask = () => new URLSearchParams(location.hash.slice(1)).get('task');
 const message = (failure: unknown) => (failure instanceof Error ? failure.message : String(failure));
@@ -24,13 +27,14 @@ export function useFactory() {
   const [connection, setConnection] = useState('Connecting');
   const [selected, setSelected] = useState<string | null>(hashTask);
   const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<Scope>(() => (localStorage.getItem(scopeKey) === 'all' ? 'all' : 'repository'));
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState<AgentState>({ harness: '', probe: null, error: '' });
   const [unseen, setUnseen] = useState<ReadonlySet<string>>(new Set());
   const [progress, setProgress] = useState<ReadonlyMap<string, ProgressUpdate>>(new Map());
-  const live = useRef({ selected, query, events: [] as TaskEvent[], loadedFor: null as string | null, probing: 0, statuses: new Map<string, TaskStatus>() });
+  const live = useRef({ selected, query, scope, events: [] as TaskEvent[], loadedFor: null as string | null, probing: 0, statuses: new Map<string, TaskStatus>() });
   const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const probe = useCallback(async (harness: string) => {
@@ -84,7 +88,7 @@ export function useFactory() {
     const refresh = refreshQueue(async () => {
       try {
         const { query: search } = live.current;
-        const next = await api<FactoryState>(`/state?${new URLSearchParams({ q: search })}`);
+        const next = await api<FactoryState>(`/state?${new URLSearchParams({ q: search, ...(live.current.scope === 'all' && { all: '1' }) })}`);
         if (search !== live.current.query) {
           refresh();
           return;
@@ -179,6 +183,17 @@ export function useFactory() {
     probe(harness);
   }), [act, probe]);
 
+  const chooseScope = useCallback((next: Scope) => {
+    live.current.scope = next;
+    localStorage.setItem(scopeKey, next);
+    setScope(next);
+    refreshRef.current();
+  }, []);
+
+  const rememberModel = useCallback((harness: string, model: string) => {
+    api('/preferences', { harness, model }).then(() => refreshRef.current(), () => undefined);
+  }, []);
+
   return {
     state,
     detail: detail?.task.id === selected ? detail : null,
@@ -187,6 +202,9 @@ export function useFactory() {
     select,
     query,
     setQuery,
+    scope,
+    chooseScope,
+    rememberModel,
     error,
     setError,
     notice,

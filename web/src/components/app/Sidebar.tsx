@@ -5,7 +5,8 @@ import { Icon } from '@/components/atoms/Icon';
 import GlideMenu from '@/components/primitives/GlideMenu';
 import { fadeUp } from '@/lib/motion';
 import type { TaskHandlers } from '@/lib/taskControls';
-import { agentName, ago, groupTasks, taskState, type GroupId } from '@/lib/tasks';
+import { agentName, ago, groupTasks, repoName, taskState, type GroupId } from '@/lib/tasks';
+import type { Scope } from '@/lib/useFactory';
 import { useStoredState } from '@/lib/useStoredState';
 import NotificationMenu from './NotificationMenu';
 import RepositoryMenu from './RepositoryMenu';
@@ -20,7 +21,7 @@ const hideOnReveal = 'transition-opacity duration-150 group-hover/row:opacity-0 
 
 type RowMenu = (task: TaskSummary, className: string) => ReactNode;
 
-function LiveCard({ task, current, onSelect, menu, peek }: { task: TaskSummary; current: boolean; onSelect: (id: string) => void; menu: RowMenu; peek: PeekBind }) {
+function LiveCard({ task, current, project, onSelect, menu, peek }: { task: TaskSummary; current: boolean; project: boolean; onSelect: (id: string) => void; menu: RowMenu; peek: PeekBind }) {
   const state = taskState(task);
   return (
     <div className="group/row relative mx-2" style={fadeUp(300)} {...peek(task)}>
@@ -33,7 +34,7 @@ function LiveCard({ task, current, onSelect, menu, peek }: { task: TaskSummary; 
       >
         <span className="flex items-center gap-1.5 text-[12px]">
           <StatusIcon kind={state.kind} size={14} />
-          <span className="truncate text-ink-3">{agentName(task.harness)}</span>
+          <span className="truncate text-ink-3">{project ? `${repoName(task.repository)} · ${agentName(task.harness)}` : agentName(task.harness)}</span>
           <span className={`ml-auto shrink-0 font-medium ${hideOnReveal} ${state.kind === 'attention' ? 'text-orange' : 'text-accent-ink'}`}>{state.label}</span>
         </span>
         <span className="line-clamp-2 text-[14px] leading-snug font-medium text-ink [overflow-wrap:anywhere]">{task.title}</span>
@@ -43,23 +44,24 @@ function LiveCard({ task, current, onSelect, menu, peek }: { task: TaskSummary; 
   );
 }
 
-type SectionProps = { id: GroupId; label: string; tasks: TaskSummary[]; selected: string | null; now: number; onSelect: (id: string) => void; menu: RowMenu; peek: PeekBind };
+type SectionProps = { id: GroupId; label: string; tasks: TaskSummary[]; selected: string | null; now: number; project: boolean; onSelect: (id: string) => void; menu: RowMenu; peek: PeekBind };
 
-function Section({ id, label, tasks, selected, now, onSelect, menu, peek }: SectionProps) {
-  const [stored, store] = useStoredState(`factory-group-${id}`, 'open');
+function Section({ id, label, tasks, selected, now, project, onSelect, menu, peek }: SectionProps) {
+  const settled = id === 'done';
+  const [stored, store] = useStoredState(`factory-group-${id}`, settled ? 'closed' : 'open');
   const [expanded, setExpanded] = useState(false);
   const open = stored !== 'closed';
   const visible = expanded ? tasks : tasks.slice(0, previewCount);
-  const settled = id === 'done';
 
   return (
     <section className="mt-3" aria-label={label}>
       <button type="button" aria-expanded={open} onClick={() => store(open ? 'closed' : 'open')} className="mx-2 flex h-8 w-[calc(100%-16px)] items-center gap-3 rounded-[8px] px-3 text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:text-ink-2">
         {label}
+        <span className="tabular-nums text-ink-3">{tasks.length}</span>
         <span aria-hidden className="h-px flex-1 bg-line" />
         <Icon name="chevronUp" strokeWidth={2.2} className="shrink-0 transition-transform duration-200" style={{ transform: open ? 'rotate(0deg)' : 'rotate(180deg)' }} />
       </button>
-      <Collapse open={open}>
+      <Collapse open={open} className={settled ? 'scroll-thin max-h-[46dvh] overflow-y-auto pb-1' : ''}>
         <GlideMenu rowSelector="[data-row]" highlightClassName="inset-x-2 rounded-[8px] bg-hover" className="flex flex-col gap-px pt-0.5">
           {visible.map(task => {
             const state = taskState(task);
@@ -77,6 +79,7 @@ function Section({ id, label, tasks, selected, now, onSelect, menu, peek }: Sect
                 >
                   <StatusIcon kind={state.kind} size={15} className={faded ? 'opacity-60 grayscale' : ''} />
                   <span className={`min-w-0 flex-1 truncate text-[13.5px] ${current ? 'font-medium text-ink' : 'text-ink-2'}`}>{task.title}</span>
+                  {project && <span className={`shrink-0 truncate text-[11.5px] text-ink-3 ${hideOnReveal}`}>{repoName(task.repository)}</span>}
                   <time dateTime={task.createdAt} className={`shrink-0 text-[12px] tabular-nums text-ink-3 ${hideOnReveal}`}>{ago(task.createdAt, now, true)}</time>
                 </button>
                 {menu(task, `${reveal} top-1/2 right-1 -translate-y-1/2`)}
@@ -105,17 +108,19 @@ type SidebarProps = {
   creating: boolean;
   connection: string;
   query: string;
+  scope: Scope;
   locked: boolean;
   busy: boolean;
   onQuery: (query: string) => void;
   onSelect: (id: string) => void;
   onNew: () => void;
   onSwitchRepository: (path: string) => void;
+  onScope: (scope: Scope) => void;
   onAddRepository: () => void;
   handlersFor: (task: TaskLike) => TaskHandlers;
 };
 
-export default function Sidebar({ ref, repository, repositories, tasks, hasMore, selected, creating, connection, query, locked, busy, onQuery, onSelect, onNew, onSwitchRepository, onAddRepository, handlersFor }: SidebarProps) {
+export default function Sidebar({ ref, repository, repositories, tasks, hasMore, selected, creating, connection, query, scope, locked, busy, onQuery, onSelect, onNew, onSwitchRepository, onScope, onAddRepository, handlersFor }: SidebarProps) {
   const menu: RowMenu = (task, className) => (
     <TaskMenu taskId={task.id} title={task.title} locked={locked} busy={busy} handlersFor={handlersFor} full onOpen={() => onSelect(task.id)} className={className} buttonClassName="size-7 text-ink-3 hover:bg-line-strong hover:text-ink aria-expanded:bg-line-strong aria-expanded:text-ink" />
   );
@@ -124,11 +129,14 @@ export default function Sidebar({ ref, repository, repositories, tasks, hasMore,
   const now = Date.now();
   const groups = groupTasks(tasks);
   const current = creating ? null : selected;
+  const project = scope === 'all';
+  const settled = groups.find(group => group.id === 'done');
+  const sections = groups.filter(group => !liveGroups.includes(group.id) && group.id !== 'done');
 
   return (
     <aside aria-label="Tasks" className="flex h-full w-[284px] shrink-0 flex-col py-2.5 max-md:w-full">
       <div className="flex h-10 shrink-0 items-center gap-1 px-2">
-        <RepositoryMenu repository={repository} repositories={repositories} onSwitch={onSwitchRepository} onAdd={onAddRepository} />
+        <RepositoryMenu repository={repository} repositories={repositories} scope={scope} onSwitch={onSwitchRepository} onScope={onScope} onAdd={onAddRepository} />
         <span id="connection" role="status" title={live ? 'Receiving live updates' : connection} className="flex shrink-0 items-center gap-1.5 px-1.5 text-[11.5px] text-ink-3">
           <span className={`size-1.5 rounded-full ${live ? 'bg-green' : 'bg-orange'}`} />
           {connection}
@@ -159,14 +167,19 @@ export default function Sidebar({ ref, repository, repositories, tasks, hasMore,
         {!tasks.length && <p className="px-5 py-3 text-[13px] text-ink-3">{query ? 'No matching tasks' : 'No tasks yet. Press N to create one.'}</p>}
         <div className="flex flex-col gap-1.5">
           {groups.filter(group => liveGroups.includes(group.id)).flatMap(group => group.tasks).map(task => (
-            <LiveCard key={task.id} task={task} current={task.id === current} onSelect={onSelect} menu={menu} peek={peek.bind} />
+            <LiveCard key={task.id} task={task} current={task.id === current} project={project} onSelect={onSelect} menu={menu} peek={peek.bind} />
           ))}
         </div>
-        {groups.filter(group => !liveGroups.includes(group.id)).map(group => (
-          <Section key={group.id} id={group.id} label={group.label} tasks={group.tasks} selected={current} now={now} onSelect={onSelect} menu={menu} peek={peek.bind} />
+        {sections.map(group => (
+          <Section key={group.id} id={group.id} label={group.label} tasks={group.tasks} selected={current} now={now} project={project} onSelect={onSelect} menu={menu} peek={peek.bind} />
         ))}
         {hasMore && <p className="px-5 pt-3 text-[12px] text-ink-3">Showing the latest 50. Search to find older tasks.</p>}
       </nav>
+      {settled && (
+        <div className="shrink-0 border-t border-line pb-0.5">
+          <Section id={settled.id} label={settled.label} tasks={settled.tasks} selected={current} now={now} project={project} onSelect={onSelect} menu={menu} peek={peek.bind} />
+        </div>
+      )}
       {peek.card}
     </aside>
   );

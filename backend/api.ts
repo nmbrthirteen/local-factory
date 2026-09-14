@@ -1,12 +1,14 @@
 import type { Server } from 'bun';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { Repository, Task } from '../shared/types';
+import type { Preferences, Repository, Task } from '../shared/types';
 import { Delivery } from './delivery';
 import { inspectRepo } from './git';
 import type { LiveApps } from './live';
+import { chooseFolder } from './process';
 import type { Runner } from './runner';
 import { eventPageSize, type Store } from './store';
 import { Terminal } from './terminal';
+import { Uploads } from './uploads';
 import { optionalCommand, text, titleFrom, validAutonomy, validHarness } from './validation';
 
 const patchLimit = 1024 * 1024;
@@ -22,7 +24,8 @@ type Handler = (context: Context) => Response | Promise<Response>;
 
 export type ApiServices = {
   store: Store;
-  runner: Pick<Runner, 'recovery' | 'active' | 'probe' | 'recover' | 'start' | 'cancel' | 'answer' | 'setAutonomy' | 'retakePreview'>;
+  root: string;
+  runner: Pick<Runner, 'recovery' | 'runs' | 'probe' | 'recover' | 'start' | 'cancel' | 'answer' | 'setAutonomy' | 'retakePreview'>;
   delivery?: Delivery;
   terminal?: Terminal;
   live?: Pick<LiveApps, 'start' | 'stop'>;
@@ -110,9 +113,10 @@ async function readPatch({ patch }: Task) {
   return { text: await Bun.file(patch.path).slice(0, patchLimit).text(), bytes: patch.bytes, truncated: patch.bytes > patchLimit };
 }
 
-export function createApi({ store, runner, ...services }: ApiServices) {
+export function createApi({ store, root, runner, ...services }: ApiServices) {
   const token = randomBytes(32).toString('hex');
-  const isRunning = (id: string) => runner.active?.id === id;
+  const uploads = new Uploads(root);
+  const isRunning = (id: string) => runner.runs.has(id);
   const delivery = services.delivery ?? new Delivery(store, isRunning);
   const terminal = services.terminal ?? new Terminal(store, isRunning);
   const live = () => {
@@ -121,6 +125,15 @@ export function createApi({ store, runner, ...services }: ApiServices) {
   };
 
   const currentRepository = () => store.setting<Repository>('repository');
+  const preferences = (): Preferences => ({ implementer: 'codex', models: {}, ...store.setting<Preferences>('preferences') });
+
+  function savePreferences(body: Body) {
+    const current = preferences();
+    const implementer = body.implementer === undefined ? current.implementer : validHarness(body.implementer);
+    const models = body.model === undefined ? current.models : { ...current.models, [validHarness(body.harness)]: text(body.model, 'Model', 150) };
+    return store.setting<Preferences>('preferences', { implementer, models });
+  }
+
   const repositories = () => {
     const current = currentRepository();
     return store.setting<Repository[]>('repositories') ?? (current ? [current] : []);
@@ -137,16 +150,16 @@ export function createApi({ store, runner, ...services }: ApiServices) {
       query: url.searchParams.get('q') ?? '',
       filter: url.searchParams.get('filter') ?? 'all',
       before: Number(url.searchParams.get('before') ?? 0),
-      repository: current?.path ?? '',
+      repository: url.searchParams.get('all') === '1' ? '' : current?.path ?? '',
     });
     return {
       repository: current,
       repositories: repositories(),
-      preferences: store.setting('preferences') ?? { implementer: 'codex' },
+      preferences: preferences(),
       ...page,
       needsYou: store.attentionCount(),
       recovery: runner.recovery.map(task => task.id),
-      active: runner.active?.id ?? null,
+      active: [...runner.runs.keys()],
     };
   }
 
@@ -165,6 +178,7 @@ export function createApi({ store, runner, ...services }: ApiServices) {
     const criteria = text(body.criteria, 'Description', 10_000);
     const input = {
       criteria,
+      images: await uploads.attach(body.images),
       title: body.title?.trim() ? text(body.title, 'Title', 100) : titleFrom(criteria),
       harness: validHarness(body.harness),
       model: text(body.model, 'Model', 150),
@@ -207,11 +221,13 @@ export function createApi({ store, runner, ...services }: ApiServices) {
     },
     'GET /api/state': ({ url }) => json(state(url)),
     'POST /api/probe': async ({ body }) => json(await runner.probe(validHarness(body.harness))),
-    'POST /api/preferences': ({ body }) => json(store.setting('preferences', { implementer: validHarness(body.implementer) })),
+    'POST /api/preferences': ({ body }) => json(savePreferences(body)),
     'POST /api/recover': () => {
       runner.recover();
       return json(ok);
     },
+    'POST /api/browse': async () => json({ path: await chooseFolder() }),
+    'POST /api/uploads': async ({ request }) => json(await uploads.save(request), 201),
     'POST /api/repository': async ({ body }) => json(await connectRepository(body)),
     'POST /api/tasks': async ({ body }) => json(await createTask(body), 201),
   };
@@ -260,6 +276,16 @@ export function createApi({ store, runner, ...services }: ApiServices) {
   const actionNames = [...new Set([...Object.keys(taskReads), ...Object.keys(taskActions)])].filter(Boolean).join('|');
   const taskPath = new RegExp(`^/api/tasks/([a-f0-9-]+)(?:/(${actionNames}))?$`);
 
+  function uploadRoute(method: string, pathname: string): Handler | null {
+    if (method !== 'GET' || !pathname.startsWith('/api/uploads/')) return null;
+    const id = pathname.slice('/api/uploads/'.length);
+    return async () => {
+      const file = Bun.file(uploads.path(id));
+      if (!(await file.exists())) throw new HttpError(404, 'No image with that reference');
+      return new Response(file, { headers: { 'Content-Type': uploads.mediaType(id), 'Cache-Control': 'private, max-age=31536000, immutable' } });
+    };
+  }
+
   function taskRoute(method: string, pathname: string): Handler | null {
     const match = pathname.match(taskPath);
     if (!match) return null;
@@ -283,8 +309,9 @@ export function createApi({ store, runner, ...services }: ApiServices) {
     if (key === 'POST /api/session') return json(ok, 200, { 'Set-Cookie': `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/api` });
     if (!hasSession(request, token)) return json({ error: 'Reconnect to the local service' }, 401);
     try {
-      const body = request.method === 'POST' ? await readJson(request) : {};
-      const handler = routes[key] ?? taskRoute(request.method, url.pathname);
+      // The upload route reads the image bytes itself, so it is the one POST that skips JSON parsing.
+      const body = request.method === 'POST' && key !== 'POST /api/uploads' ? await readJson(request) : {};
+      const handler = routes[key] ?? uploadRoute(request.method, url.pathname) ?? taskRoute(request.method, url.pathname);
       if (!handler) throw new HttpError(404, 'Unknown API route');
       return await handler({ request, url, body, server });
     } catch (error) {

@@ -203,11 +203,11 @@ store.event(rounding.id, 'message', 'The split rounds each share on its own, so 
 store.event(rounding.id, 'request', 'Agent needs your input', { tool: 'question' });
 
 const runner = {
-  active: { id: budget.id },
+  runs: new Map([[budget.id, { id: budget.id }]]),
   recovery: [],
   probe: async (harness: string) => ({ harness, version: 'demo', authenticated: true, models: [] }),
 } as unknown as ApiServices['runner'];
-const api = createApi({ store, runner });
+const api = createApi({ store, root, runner });
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

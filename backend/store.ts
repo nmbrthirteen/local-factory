@@ -76,7 +76,6 @@ export class Store extends EventEmitter {
 
   claim(id: string, allowed: readonly string[]) {
     this.db.transaction(() => {
-      if (this.db.query(`SELECT 1 FROM tasks WHERE ${statusIn(activeStates)} LIMIT 1`).get()) throw new Error('Another task is active. Finish or cancel it first.');
       const task = this.get(id);
       if (!task || !allowed.includes(task.status)) throw new Error('This task cannot start from its current state');
       this.update(id, { status: 'preparing', startedAt: now() });

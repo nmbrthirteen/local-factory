@@ -47,5 +47,5 @@ export function usePromptHistory(key: string) {
     setValue(next < 0 ? '' : history[next]);
   };
 
-  return { record, recall, hasHistory: () => readHistory(key).length > 0 };
+  return { record, recall };
 }

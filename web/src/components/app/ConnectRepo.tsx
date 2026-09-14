@@ -2,7 +2,10 @@ import { useState, type CSSProperties } from 'react';
 import { Button } from '@/components/atoms/Button';
 import { Logo } from '@/components/atoms/Logo';
 import Modal from '@/components/primitives/Modal';
+import { api } from '@/lib/live';
 import { fadeUp } from '@/lib/motion';
+
+const pickerTimeoutMs = 5 * 60_000;
 
 type ConnectProps = { busy: boolean; onConnect: (path: string) => void };
 type FormProps = ConnectProps & { page?: boolean; onCancel?: () => void; className?: string; style?: CSSProperties };
@@ -10,8 +13,23 @@ type FormProps = ConnectProps & { page?: boolean; onCancel?: () => void; classNa
 function ConnectRepoForm({ busy, onConnect, onCancel, page = false, className = '', style }: FormProps) {
   const [path, setPath] = useState('');
   const [trusted, setTrusted] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [pickerError, setPickerError] = useState('');
   const ready = Boolean(path.trim()) && trusted;
   const Heading = page ? 'h1' : 'h2';
+
+  async function choose() {
+    setPicking(true);
+    setPickerError('');
+    try {
+      const chosen = await api<{ path: string | null }>('/browse', {}, pickerTimeoutMs);
+      if (chosen.path) setPath(chosen.path);
+    } catch (failure) {
+      setPickerError(failure instanceof Error ? failure.message : 'Could not open the folder picker');
+    } finally {
+      setPicking(false);
+    }
+  }
 
   return (
     <form
@@ -29,10 +47,14 @@ function ConnectRepoForm({ busy, onConnect, onCancel, page = false, className = 
           <Heading className="text-[17px] font-semibold tracking-[-0.02em] text-ink">Connect a repository</Heading>
           <p className="mt-1 text-[13px] leading-normal text-ink-2">Each task runs an agent in its own Git worktree. Your branch changes only when you merge.</p>
         </div>
-        <label className="grid gap-1.5 text-[12.5px] font-medium text-ink-2">
-          Repository folder
-          <input name="path" autoFocus required value={path} onChange={event => setPath(event.target.value)} placeholder="/Users/you/projects/my-app" autoComplete="off" className="h-9 w-full rounded-[8px] bg-field px-2.5 font-mono text-[12.5px] text-ink shadow-hairline outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]" />
-        </label>
+        <div className="grid gap-1.5">
+          <label htmlFor="repository-path" className="text-[12.5px] font-medium text-ink-2">Repository folder</label>
+          <div className="flex gap-1.5">
+            <input id="repository-path" name="path" autoFocus required value={path} onChange={event => setPath(event.target.value)} placeholder="/Users/you/projects/my-app" autoComplete="off" className="h-9 min-w-0 flex-1 rounded-[8px] bg-field px-2.5 font-mono text-[12.5px] text-ink shadow-hairline outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]" />
+            <Button type="button" id="browse" variant="secondary" className="h-9 shrink-0 rounded-[8px] px-3" disabled={picking} onClick={choose}>{picking ? 'Choosing' : 'Choose'}</Button>
+          </div>
+          {pickerError && <p role="alert" className="text-[12px] text-red">{pickerError}</p>}
+        </div>
         <label className="flex items-start gap-2 text-[13px] text-ink-2">
           <input type="checkbox" name="trusted" checked={trusted} onChange={event => setTrusted(event.target.checked)} className="mt-0.5 size-4 accent-[var(--ink)]" />
           I trust this repository and the scripts it runs.

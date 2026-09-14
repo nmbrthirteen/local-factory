@@ -1,21 +1,24 @@
 import { createSdkMcpServer, query as sdkQuery, tool, type AccountInfo, type CanUseTool, type McpServerConfig, type ModelInfo, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentProbe } from '../../shared/types';
+import type { AgentProbe, PromptImage } from '../../shared/types';
 import { previewTools, type ToolResult } from '../browser';
 import { safeEnv } from '../process';
 
 export type { CanUseTool, McpServerConfig, ModelInfo, PermissionResult, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export const supportedClaudeVersion = '2.1.268';
+const modelSuffix = /\s*\([^)]*\)\s*$/;
 export const claudeTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'AskUserQuestion'];
 export const claudeSandbox = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true, network: { allowedDomains: [] as string[] } };
 
 export type ClaudeQuery = typeof sdkQuery;
 export type ToolRequestOptions = Parameters<CanUseTool>[2];
 
+type Turn = { text: string; images: PromptImage[] };
+
 export type ClaudeSession = {
   messages: AsyncIterable<SDKMessage>;
   info: () => Promise<{ account: AccountInfo; models: ModelInfo[]; pid?: number }>;
-  send: (text: string) => void;
+  send: (text: string, images?: PromptImage[]) => void;
   interrupt: () => Promise<unknown>;
   close: () => void;
 };
@@ -42,13 +45,19 @@ export function factoryServer(handle: (name: string, input: unknown) => Promise<
 }
 
 export function openClaude({ query = sdkQuery, cwd, model, instructions, canUseTool, mcpServers = {} }: OpenClaudeOptions): ClaudeSession {
-  const prompt = Promise.withResolvers<string | null>();
+  const prompt = Promise.withResolvers<Turn | null>();
   const finished = Promise.withResolvers<void>();
   let closed = false;
 
   async function* input() {
-    const text = await prompt.promise;
-    if (text !== null) yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null } as SDKUserMessage;
+    const turn = await prompt.promise;
+    if (turn) {
+      const content = [
+        ...turn.images.map(image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.base64 } })),
+        { type: 'text' as const, text: turn.text },
+      ];
+      yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
+    }
     await finished.promise;
   }
 
@@ -77,7 +86,7 @@ export function openClaude({ query = sdkQuery, cwd, model, instructions, canUseT
       const init = await session.initializationResult();
       return { account: init.account, models: init.models, pid: (init as { pid?: number }).pid };
     },
-    send: text => prompt.resolve(text),
+    send: (text, images = []) => prompt.resolve({ text, images }),
     interrupt: () => session.interrupt().catch(() => undefined),
     close() {
       if (closed) return;
@@ -93,12 +102,17 @@ export async function probeClaude(query?: ClaudeQuery): Promise<AgentProbe> {
   const session = openClaude({ query, cwd: process.cwd(), canUseTool: async () => ({ behavior: 'deny', message: 'Connection check only' }) });
   try {
     const { account, models } = await session.info();
+    // An alias row such as 'default' names itself and nothing else, so it carries the name of the model it resolves to.
+    const named = new Map(models.filter(model => model.resolvedModel === model.value).map(model => [model.value, model.displayName]));
     return {
       harness: 'claude',
       version: supportedClaudeVersion,
       authenticated: Boolean(account.email || account.apiKeySource),
       account: account.subscriptionType,
-      models: models.map(model => ({ id: model.value, name: model.displayName, isDefault: model.value === 'default' })),
+      models: models.map(model => {
+        const resolved = model.resolvedModel && model.resolvedModel !== model.value ? named.get(model.resolvedModel) ?? model.resolvedModel : undefined;
+        return { id: model.value, name: model.displayName.replace(modelSuffix, ''), isDefault: model.value === 'default', detail: resolved };
+      }),
     };
   } finally {
     session.close();

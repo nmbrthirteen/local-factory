@@ -39,6 +39,10 @@ export type InstructionFile = { scope: 'global' | 'repository'; path: string; la
 
 export type PreviewShot = { name: 'desktop' | 'mobile'; width: number; height: number; path: string; bytes: number };
 
+export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+export type TaskImage = { id: string; name: string; mediaType: ImageMediaType; bytes: number };
+export type PromptImage = TaskImage & { base64: string };
+
 export type LiveApp = { url: string; command: string[]; startedAt: string };
 
 export type Preview = {
@@ -68,6 +72,7 @@ export type Task = {
   repo: Repository;
   setup: string[];
   check: string[];
+  images?: TaskImage[];
   createdAt: string;
   updatedAt?: string;
   startedAt?: string;
@@ -111,7 +116,7 @@ export type Task = {
   agentPolicy?: unknown;
 };
 
-export type NewTask = Pick<Task, 'title' | 'criteria' | 'model' | 'repo' | 'setup' | 'check'> & Partial<Pick<Task, 'harness' | 'autonomy' | 'worktree' | 'patch'>>;
+export type NewTask = Pick<Task, 'title' | 'criteria' | 'model' | 'repo' | 'setup' | 'check'> & Partial<Pick<Task, 'harness' | 'autonomy' | 'worktree' | 'patch' | 'images'>>;
 
 export type TaskSummary = Pick<Task, 'id' | 'title' | 'status' | 'createdAt' | 'model' | 'harness' | 'settled'> & {
   repository: string;
@@ -129,7 +134,8 @@ export type TaskEvent = { id: number; type: string; text: string; details: Recor
 
 export type TaskPage = { tasks: TaskSummary[]; page: { counts: Record<string, number>; total: number; next: number | null } };
 
-export type AgentModel = { id: string; name: string; isDefault?: boolean };
+export type AgentModel = { id: string; name: string; isDefault?: boolean; detail?: string };
+export type Preferences = { implementer: Harness; models: Record<string, string> };
 export type AgentProbe = { harness: Harness; version: string; authenticated: boolean; account?: string; models: AgentModel[]; recovery?: string[] };
 
 export type ProgressKind = 'output' | 'message';
@@ -139,8 +145,8 @@ export type ProgressEvent = ProgressUpdate | { taskId: string; cleared: true };
 export type FactoryState = TaskPage & {
   repository: Repository | null;
   repositories: Repository[];
-  preferences: { implementer: Harness };
+  preferences: Preferences;
   needsYou: number;
   recovery: string[];
-  active: string | null;
+  active: string[];
 };

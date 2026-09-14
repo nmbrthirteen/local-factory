@@ -15,7 +15,9 @@ export function fakeClaude(script: Script = {}) {
     let closed = false;
     const messages = (async function* () {
       for await (const message of prompt) {
-        calls.prompt = message.message.content;
+        const content = message.message.content;
+        calls.content = content;
+        calls.prompt = content.filter((block: { type: string }) => block.type === 'text').map((block: { text: string }) => block.text).join('\n');
         yield { type: 'system', subtype: 'init', claude_code_version: supportedClaudeVersion, cwd: options.cwd, model: 'claude-sonnet-5', permissionMode: options.permissionMode, tools: [...options.tools, ...Object.keys(options.mcpServers).map(name => `mcp__${name}__preview_open`)], mcp_servers: Object.keys(options.mcpServers).map(name => ({ name, status: 'connected' })), plugins: script.plugins ?? [] };
         if (script.factoryTool) calls.factoryDecision = await options.canUseTool('mcp__factory__preview_logs', {}, requestOptions('tool-3'));
         if (script.wait) {

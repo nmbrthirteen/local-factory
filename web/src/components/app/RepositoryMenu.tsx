@@ -5,16 +5,20 @@ import GlideMenu from '@/components/primitives/GlideMenu';
 import { popIn } from '@/lib/motion';
 import { repoName } from '@/lib/tasks';
 import { usePopover } from '@/lib/usePopover';
+import type { Scope } from '@/lib/useFactory';
 import { MenuCheck, MenuDivider, MenuLabel, menuHighlight, menuItem, popoverClass } from './Menu';
 
 type RepositoryMenuProps = {
   repository: Repository;
   repositories: Repository[];
+  scope: Scope;
   onSwitch: (path: string) => void;
+  onScope: (scope: Scope) => void;
   onAdd: () => void;
 };
 
-export default function RepositoryMenu({ repository, repositories, onSwitch, onAdd }: RepositoryMenuProps) {
+export default function RepositoryMenu({ repository, repositories, scope, onSwitch, onScope, onAdd }: RepositoryMenuProps) {
+  const everywhere = scope === 'all';
   const { open, setOpen, ref } = usePopover();
   const choose = (action: () => void) => () => {
     setOpen(false);
@@ -33,18 +37,25 @@ export default function RepositoryMenu({ repository, repositories, onSwitch, onA
         className={`flex h-8 w-full items-center gap-2 rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99] ${open ? 'bg-hover-2' : ''}`}
       >
         <Logo />
-        <span className="min-w-0 truncate text-[14px] font-medium text-ink">{repoName(repository.path)}</span>
-        {repository.dirty && <span className="shrink-0 text-[11.5px] text-orange">uncommitted changes</span>}
+        <span className="min-w-0 truncate text-[14px] font-medium text-ink">{everywhere ? 'All projects' : repoName(repository.path)}</span>
+        {!everywhere && repository.dirty && <span className="shrink-0 text-[11.5px] text-orange">uncommitted changes</span>}
         <Icon name="chevronDown" strokeWidth={2.2} className="ml-auto shrink-0 text-ink-3" />
       </button>
       {open && (
         <div role="menu" aria-label="Repositories" className={`${popoverClass} left-0 w-[268px]`} style={popIn(180, 'top left')}>
           <MenuLabel>Repositories</MenuLabel>
           <GlideMenu className="flex flex-col" highlightClassName={menuHighlight}>
+            <button type="button" role="menuitemradio" aria-checked={everywhere} data-menu-row onClick={choose(() => onScope('all'))} className="relative z-10 flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12.5px] font-medium text-ink">All projects</span>
+                <span className="block truncate text-[11px] text-ink-3">Tasks from every connected repository</span>
+              </span>
+              <MenuCheck on={everywhere} />
+            </button>
             {repositories.map(repo => {
-              const current = repo.path === repository.path;
+              const current = !everywhere && repo.path === repository.path;
               return (
-                <button key={repo.path} type="button" role="menuitemradio" aria-checked={current} data-menu-row onClick={choose(() => !current && onSwitch(repo.path))} className="relative z-10 flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left">
+                <button key={repo.path} type="button" role="menuitemradio" aria-checked={current} data-menu-row onClick={choose(() => { onScope('repository'); if (repo.path !== repository.path) onSwitch(repo.path); })} className="relative z-10 flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-medium text-ink">{repoName(repo.path)}</span>
                     <span className="block truncate font-mono text-[11px] text-ink-3" title={repo.path}>{repo.path}</span>

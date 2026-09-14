@@ -41,7 +41,7 @@ export async function createFixture(onCleanup: (cleanup: () => unknown) => void,
     claudeQuery: agents.claude as ClaudeQuery | undefined,
     opencode: agents.opencode as OpenOpencode | undefined,
   });
-  const delivery = new Delivery(store, id => runner.active?.id === id);
+  const delivery = new Delivery(store, id => runner.runs.has(id));
   onCleanup(async () => {
     await runner.shutdown();
     store.close();
@@ -69,11 +69,11 @@ export async function createFixture(onCleanup: (cleanup: () => unknown) => void,
     },
     async run(id: string, feedback?: string) {
       runner.start(id, feedback);
-      await runner.active?.done;
+      await runner.runs.get(id)?.done;
       return store.require(id);
     },
     async settled(id: string) {
-      await until(() => !runner.active && ['handoff', 'failed', 'canceled'].includes(store.require(id).status), { attempts: 400, delayMs: 50 });
+      await until(() => !runner.runs.has(id) && ['handoff', 'failed', 'canceled'].includes(store.require(id).status), { attempts: 400, delayMs: 50 });
       return store.require(id);
     },
   };

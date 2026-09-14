@@ -59,7 +59,8 @@ const previewToolInstructions = 'To check interface changes before you finish, u
 export function taskPrompt(task: Task, setupRan: string[], followUp: boolean) {
   const setupNote = setupRan.length ? `Setup already ran in this worktree: ${setupRan.join(' ')}\n` : '';
   const tools = task.harness === 'opencode' ? '' : `\n${previewToolInstructions}`;
-  const brief = `Task: ${task.title}\nWhat done looks like:\n${task.criteria}\n${setupNote}${checkInstructions(task)}\n${previewInstructions}${tools}`;
+  const images = task.images?.length ? `${task.images.length === 1 ? 'One image is' : `${task.images.length} images are`} attached to this message: ${task.images.map(image => image.name).join(', ')}.\n` : '';
+  const brief = `Task: ${task.title}\nWhat done looks like:\n${task.criteria}\n${images}${setupNote}${checkInstructions(task)}\n${previewInstructions}${tools}`;
   return followUp ? `${brief}\n\n${followUpNote(task)}` : brief;
 }
 

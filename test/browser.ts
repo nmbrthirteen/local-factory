@@ -23,12 +23,12 @@ store.update(task.id, { status: 'awaiting_approval', requests: [{ key: 'reply-1'
 for (let index = 0; index < 30; index++) store.event(task.id, 'message', `Recorded output ${index}`);
 
 const runner = {
-  active: { id: task.id },
+  runs: new Map([[task.id, { id: task.id }]]),
   recovery: [],
   probe: async (harness: string) => ({ harness, version: 'test', authenticated: true, models: [{ id: 'test-model', name: 'Test model', isDefault: true }] }),
 } as unknown as ApiServices['runner'];
 
-let api = createApi({ store, runner });
+let api = createApi({ store, root, runner });
 let slowDetail = false;
 let stateCalls = 0;
 
@@ -76,7 +76,7 @@ try {
   slowDetail = false;
   console.log('430-event burst catches up in order, without duplicates; the feed keeps 200 events.');
 
-  api = createApi({ store, runner });
+  api = createApi({ store, root, runner });
   const port = server.port;
   server.stop(true);
   server = listen(port);
@@ -131,7 +131,6 @@ try {
   await evaluate('document.querySelector("[aria-label^=Permissions]").click(); true');
   await waitFor('document.querySelector("[role=option]")');
   await evaluate('[...document.querySelectorAll("[role=option]")].find(node => node.textContent.includes("full access")).click(); true');
-  assert.equal(await evaluate('document.querySelector("#autonomy-note").textContent.includes("outside the worktree")'), true);
   await browser('click', '#retry-agent');
   await waitFor('document.querySelector("#agent-status").textContent.includes("Ready")');
   assert.equal(await evaluate('document.querySelector("[name=criteria]").value'), 'Keep this task draft');

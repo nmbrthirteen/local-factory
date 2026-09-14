@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentModel, AgentProbe, QuestionOption } from '../../shared/types';
+import type { AgentModel, AgentProbe, PromptImage, QuestionOption } from '../../shared/types';
 import { run, safeEnv, stopProcessGroup } from '../process';
 
 const supportedOpencodeVersion = '1.18.30';
@@ -11,6 +11,8 @@ const opencodePermissions = { edit: 'allow', bash: 'allow', webfetch: 'deny', we
 const binary = join(import.meta.dir, '../../node_modules/.bin/opencode');
 const startTimeoutMs = 20_000;
 const baseConfig = { autoupdate: false, share: 'disabled', snapshot: false, mcp: {}, plugin: [], lsp: false, formatter: false };
+const ollamaHost = (Bun.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const ollamaTimeoutMs = 1500;
 const isolationEnv = {
   OPENCODE_DISABLE_PROJECT_CONFIG: '1',
   OPENCODE_DISABLE_AUTOUPDATE: '1',
@@ -37,7 +39,7 @@ export type OpencodeSession = {
   policy: OpencodePolicy;
   models: AgentModel[];
   events: AsyncIterable<OpencodeEvent>;
-  send: (prompt: string) => Promise<void>;
+  send: (prompt: string, images?: PromptImage[]) => Promise<void>;
   replyPermission: (id: string, reply: 'once' | 'reject') => Promise<unknown>;
   replyQuestion: (id: string, answers: string[][]) => Promise<unknown>;
   interrupt: () => Promise<unknown>;
@@ -84,6 +86,27 @@ async function prepareSandbox(root: string, runId: string, cwd: string): Promise
   await writeFile(shell, `#!/bin/sh\nexport TMPDIR=${shellPath(tmp)} XDG_CACHE_HOME=${shellPath(cache)} npm_config_cache=${shellPath(join(cache, 'npm'))}\nexec /usr/bin/sandbox-exec -f ${shellPath(profile)} /bin/zsh "$@"\n`, { mode: 0o700 });
   return { shell, configHome, worktree, writable: [worktree, tmp, cache] };
 }
+
+type OllamaModel = { model: string; name: string; capabilities?: string[] };
+
+// Ollama serves the OpenAI API, so local models join as one more provider. A model that reports no tool calling cannot drive an agent.
+async function ollamaProvider() {
+  const tags = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(ollamaTimeoutMs) })
+    .then(response => (response.ok ? (response.json() as Promise<{ models?: OllamaModel[] }>) : null))
+    .catch(() => null);
+  const models = (tags?.models ?? []).filter(model => model.capabilities?.includes('tools') ?? true);
+  if (!models.length) return {};
+  return {
+    ollama: {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Ollama',
+      options: { baseURL: `${ollamaHost}/v1` },
+      models: Object.fromEntries(models.map(model => [model.model, { name: model.name, tool_call: true }])),
+    },
+  };
+}
+
+const sessionConfig = async () => ({ ...baseConfig, provider: await ollamaProvider() });
 
 export function freePort() {
   const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() });
@@ -214,7 +237,7 @@ function policyProblem(effective: Record<string, any>, directory: string, sandbo
 export const openOpencode: OpenOpencode = async ({ root, runId, cwd, model, instructions }) => {
   const version = await opencodeVersion();
   const sandbox = await prepareSandbox(root, runId, cwd);
-  const server = await startServer({ cwd: sandbox.worktree, config: { ...baseConfig, shell: sandbox.shell, permission: opencodePermissions }, configHome: sandbox.configHome });
+  const server = await startServer({ cwd: sandbox.worktree, config: { ...(await sessionConfig()), shell: sandbox.shell, permission: opencodePermissions }, configHome: sandbox.configHome });
   const abort = new AbortController();
   const state = { prompted: false };
   try {
@@ -235,9 +258,13 @@ export const openOpencode: OpenOpencode = async ({ root, runId, cwd, model, inst
       policy: { version, directory, shell: effective.shell, permission: effective.permission, writable: sandbox.writable },
       models: listModels(providers),
       events: normalize(parseEvents(stream.body), session.id, state),
-      async send(prompt) {
+      async send(prompt, images = []) {
         state.prompted = true;
-        await server.request('POST', `/session/${session.id}/prompt_async`, { model: { providerID, modelID: modelID.join('/') }, system: instructions, parts: [{ type: 'text', text: prompt }] });
+        const parts = [
+          ...images.map(image => ({ type: 'file', mime: image.mediaType, filename: image.name, url: `data:${image.mediaType};base64,${image.base64}` })),
+          { type: 'text', text: prompt },
+        ];
+        await server.request('POST', `/session/${session.id}/prompt_async`, { model: { providerID, modelID: modelID.join('/') }, system: instructions, parts });
       },
       replyPermission: (id, reply) => server.request('POST', `/permission/${id}/reply`, { reply }),
       replyQuestion: (id, answers) => server.request('POST', `/question/${id}/reply`, { answers }),
@@ -258,7 +285,7 @@ export async function probeOpencode(root: string): Promise<AgentProbe> {
   const version = await opencodeVersion();
   const configHome = join(root, '.factory/sandbox/probe-config');
   await mkdir(configHome, { recursive: true });
-  const server = await startServer({ cwd: root, config: baseConfig, configHome });
+  const server = await startServer({ cwd: root, config: await sessionConfig(), configHome });
   try {
     const providers = await server.request<Providers>('GET', '/provider');
     return { harness: 'opencode', version, authenticated: providers.connected.length > 0, account: providers.connected.join(', '), models: listModels(providers) };

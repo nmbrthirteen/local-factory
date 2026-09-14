@@ -12,12 +12,12 @@ const dist = join(root, 'dist');
 const port = Number(Bun.env.PORT ?? 4310);
 
 const store = new Store(join(root, '.factory/state.sqlite'));
-const isRunning = (id: string) => runner.active?.id === id;
+const isRunning = (id: string) => runner.runs.has(id);
 const live = new LiveApps(store, isRunning, { root, servicePort: port });
 const runner = new Runner(store, root, { servicePort: port, live });
 const delivery = new Delivery(store, isRunning, live);
 const terminal = new Terminal(store, isRunning);
-const api = createApi({ store, runner, delivery, terminal, live });
+const api = createApi({ store, root, runner, delivery, terminal, live });
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

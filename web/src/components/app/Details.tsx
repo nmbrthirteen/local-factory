@@ -40,6 +40,15 @@ export default function Details({ task, busy, locked, onRollback, onRemove }: De
         <section>
           <Heading>Task</Heading>
           <div className="text-[14px] leading-[1.65] text-ink [overflow-wrap:anywhere]"><Markdown text={task.criteria} /></div>
+          {task.images && task.images.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {task.images.map(image => (
+                <a key={image.id} href={`/api/uploads/${image.id}`} target="_blank" rel="noreferrer" title={image.name} className="block size-20 shrink-0 cursor-zoom-in overflow-hidden rounded-[10px] bg-inset shadow-hairline">
+                  <img src={`/api/uploads/${image.id}`} alt={image.name} loading="lazy" className="size-full object-cover" />
+                </a>
+              ))}
+            </div>
+          )}
         </section>
 
         <section>

@@ -1,4 +1,4 @@
-import type { ProgressEvent } from '@shared/types';
+import type { ProgressEvent, TaskImage } from '@shared/types';
 
 const reconnectDelayMs = 1500;
 const staleAfterMs = 30_000;
@@ -7,6 +7,13 @@ const fallbackRefreshMs = 15_000;
 export async function api<T = unknown>(path: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
   const request: RequestInit = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
   const response = await fetch(`/api${path}`, { signal: AbortSignal.timeout(timeoutMs), ...request });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  return result;
+}
+
+export async function uploadImage(file: File): Promise<TaskImage> {
+  const response = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': file.type, 'X-Image-Name': encodeURIComponent(file.name) }, body: file });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error);
   return result;

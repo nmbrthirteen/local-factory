@@ -145,7 +145,7 @@ function FollowUp({ task, busy, locked, onRetry }: { task: Task; busy: boolean; 
         className="w-full resize-none bg-transparent px-1 text-[13.5px] leading-normal text-ink outline-none placeholder:text-ink-3"
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {locked && !busy && <span className="pl-1 text-[12px] text-ink-3">Another run is active</span>}
+        {locked && !busy && <span className="pl-1 text-[12px] text-ink-3">The local service is not ready</span>}
         <Button type="submit" variant="primary" size="sm" className="ml-auto" disabled={disabled}>{draft.trim() ? 'Send and run' : 'Run again'} <kbd>⌘↵</kbd></Button>
       </div>
     </form>

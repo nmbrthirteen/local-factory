@@ -1,3 +1,4 @@
+import { isActive } from '@shared/domain';
 import type { Task } from '@shared/types';
 import { Button } from '@/components/atoms/Button';
 import { ago } from '@/lib/tasks';
@@ -8,7 +9,7 @@ type PreviewProps = { task: Task; busy: boolean; locked: boolean; onRetake: () =
 
 export default function Preview({ task, busy, locked, onRetake, onStartApp, onStopApp }: PreviewProps) {
   const { preview, liveApp } = task;
-  const canRetake = Boolean(task.worktree) && !task.worktreeRemoved && Boolean(task.candidate);
+  const canRetake = Boolean(task.worktree) && !task.worktreeRemoved && Boolean(task.candidate) && !isActive(task.status);
   const image = (name: string) => `/api/tasks/${task.id}/preview?shot=${name}&at=${encodeURIComponent(preview?.at ?? '')}`;
   const stale = preview && preview.candidate !== task.candidate;
   const kind = !preview ? 'info' : preview.status === 'failed' ? 'failed' : preview.errors.length ? 'unchecked' : 'passed';

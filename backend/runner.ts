@@ -3,7 +3,7 @@ import { mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isFinished, type Autonomy } from '../shared/domain';
-import type { AgentProbe, AgentRequest, CommandResult, Question, QuestionOption, Task, Worktree } from '../shared/types';
+import type { AgentProbe, AgentRequest, CommandResult, PromptImage, Question, QuestionOption, Task, Worktree } from '../shared/types';
 import { claudeSandbox, claudeTools, factoryServer, factoryServerName, isFactoryTool, openClaude, probeClaude, supportedClaudeVersion, type ClaudeQuery, type McpServerConfig, type ModelInfo, type PermissionResult, type SDKMessage, type ToolRequestOptions } from './agents/claude';
 import { Codex, isolatedConfig, sandbox, type CodexMessage } from './agents/codex';
 import { openOpencode, probeOpencode, type OpencodeEvent, type OpencodeSession, type OpenOpencode } from './agents/opencode';
@@ -14,13 +14,16 @@ import { loadInstructions } from './instructions';
 import type { LiveApps } from './live';
 import { capturePreview, previewSummary, type Browser, type Capture } from './preview';
 import type { Store } from './store';
+import { dataUrl, Uploads } from './uploads';
 import { validAutonomy } from './validation';
 
 const maxAttempts = 3;
 const probeTtlMs = 60_000;
 const outputLimit = 12_000;
 const execOutputBytes = 24_000;
-const setupTimeoutMs = 600_000;
+const setupTimeoutMs = 1_200_000;
+const timedOutExit = 124;
+const missingCommandExit = 71;
 const checkTimeoutMs = 120_000;
 const retryNote = 'The check failed. Read its output, fix the cause, and keep every test passing.';
 const standingAnswer = 'Use your best judgment from the task description and keep going.';
@@ -98,6 +101,13 @@ function ensureActive(run: Run) {
   if (run.canceled) throw new Error('Run canceled');
 }
 
+function setupFailure({ exitCode, stderr = '' }: CommandResult, command: string[], timeoutMs: number) {
+  if (exitCode === timedOutExit) return `Setup ran past its ${Math.round(timeoutMs / 60_000)}-minute limit. Run ${command.join(' ')} in the repository first, then start the task again.`;
+  const missing = exitCode === missingCommandExit ? stderr.match(/execvp\(\) of '([^']+)' failed/)?.[1] : undefined;
+  if (missing) return `${missing} is not installed, so setup could not run. Install it, or set a different setup command on the task.`;
+  return 'Setup failed. Inspect its output and the preserved worktree.';
+}
+
 function collectAnswers(questions: Question[] = [], input: Record<string, any>) {
   return Object.fromEntries(questions.map(question => {
     const answer = input.answers?.[question.id];
@@ -139,7 +149,7 @@ async function claudePolicyMatches(policy: ClaudePolicy, worktree: Worktree, mod
 }
 
 export class Runner {
-  active: Run | null = null;
+  readonly runs = new Map<string, Run>();
   recovery: Task[];
   adapter: () => Codex;
   version: () => Promise<string>;
@@ -154,6 +164,7 @@ export class Runner {
   private readonly servicePort?: number;
   private readonly live?: Pick<LiveApps, 'start' | 'release'>;
   private readonly probes = new Map<string, { at: number; result: AgentProbe }>();
+  private readonly uploads: Uploads;
 
   constructor(store: Store, root: string, options: RunnerOptions = {}) {
     this.store = store;
@@ -169,6 +180,7 @@ export class Runner {
     this.opencode = options.opencode ?? openOpencode;
     this.opencodeProbe = options.opencodeProbe ?? probeOpencode;
     this.recovery = store.activeTasks();
+    this.uploads = new Uploads(root);
   }
 
   async probe(harness: string) {
@@ -182,7 +194,7 @@ export class Runner {
 
   start(id: string, feedback = '', automatic = false) {
     if (this.recovery.length) throw new Error('A previous run was interrupted by a service restart. Restart the machine to stop orphaned tools, then acknowledge recovery.');
-    if (this.active) throw new Error('Another task is active');
+    if (this.runs.has(id)) throw new Error('This task is already running');
     const task = this.store.require(id);
     if (task.commit) throw new Error('These changes are already committed. Create a new task for further changes.');
     if (task.worktreeRemoved) throw new Error("This task's worktree was removed. Create a new task instead.");
@@ -197,7 +209,7 @@ export class Runner {
     const limitMs = (autonomy === 'ask' ? 15 : 45) * 60_000;
     const { promise: turn, resolve: finishTurn } = Promise.withResolvers<TurnResult>();
     const run: Run = { id, client: this.adapter(), autonomy, pending: new Map(), turn, finishTurn, canceled: false, limitMs, remainingMs: limitMs, deadline: 0, timer: null };
-    this.active = run;
+    this.runs.set(id, run);
     run.done = this.execute(run);
     return this.store.require(id);
   }
@@ -208,8 +220,8 @@ export class Runner {
     if (task.commit || task.worktreeRemoved) throw new Error('This task is finished. Create a new task instead.');
     this.store.update(id, { autonomy: level });
     this.store.event(id, 'autonomy', `Permissions: ${autonomyLabels[level]}`);
-    const run = this.active;
-    if (run?.id === id && !run.canceled) {
+    const run = this.runs.get(id);
+    if (run && !run.canceled) {
       run.autonomy = level;
       for (const key of [...run.pending.keys()]) this.autoAnswer(run, key);
     }
@@ -217,8 +229,8 @@ export class Runner {
   }
 
   answer(id: string, key: string, input: Record<string, any>, automatic = false) {
-    const run = this.active;
-    const request = run?.id === id ? run.pending.get(key) : undefined;
+    const run = this.runs.get(id);
+    const request = run?.pending.get(key);
     if (!run || !request || run.canceled) throw new Error('This request is no longer active');
     const reply: Reply = request.kind === 'question' ? { answers: collectAnswers(request.params.questions, input) } : { decision: validDecision(input.decision) };
     request.reply(reply);
@@ -229,8 +241,8 @@ export class Runner {
   }
 
   cancel(id: string, reason = 'Stopped by you') {
-    const run = this.active;
-    if (run?.id !== id) {
+    const run = this.runs.get(id);
+    if (!run) {
       if (this.store.get(id)?.status !== 'queued') throw new Error('Task is not active');
       this.store.update(id, { status: 'canceled' });
       this.store.event(id, 'canceled', reason);
@@ -262,10 +274,9 @@ export class Runner {
   }
 
   async shutdown() {
-    const run = this.active;
-    if (!run) return;
-    this.cancel(run.id, 'Local service stopped');
-    await run.done;
+    const running = [...this.runs.values()];
+    for (const run of running) this.cancel(run.id, 'Local service stopped');
+    await Promise.all(running.map(run => run.done));
   }
 
   recover() {
@@ -311,7 +322,7 @@ export class Runner {
       ensureActive(run);
       const setupRan = followUp ? task.setupResult?.command ?? [] : await this.runSetup(run, task, worktree);
       const instructions = await this.loadInstructions(task, worktree);
-      await this.startAgent(run, task, worktree, instructions, taskPrompt(task, setupRan, followUp), overrides);
+      await this.startAgent(run, task, worktree, instructions, taskPrompt(task, setupRan, followUp), await this.uploads.load(task.images), overrides);
       const turn = await run.turn;
       await run.preview?.close();
       ensureActive(run);
@@ -369,7 +380,7 @@ export class Runner {
     ensureActive(run);
     this.store.update(run.id, { setupResult: result });
     this.store.event(run.id, 'setup_result', result.exitCode === 0 ? 'Setup done' : `Setup failed: exit ${result.exitCode}`, { exitCode: result.exitCode, durationMs: result.durationMs, stdout: result.stdout, stderr: result.stderr });
-    if (result.exitCode !== 0) throw new Error('Setup failed. Inspect its output and the preserved worktree.');
+    if (result.exitCode !== 0) throw new Error(setupFailure(result, setup, setupTimeoutMs));
     if ((await candidateTree(worktree.path)) !== (await baseTree(worktree.path, task.repo.base))) throw new Error('Setup changed repository files. Ignore generated paths in .gitignore or use a command that keeps the lockfile unchanged.');
     return setup;
   }
@@ -382,14 +393,14 @@ export class Runner {
     return developerInstructions(instructions);
   }
 
-  private startAgent(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, overrides?: Record<string, unknown>) {
+  private startAgent(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, images: PromptImage[], overrides?: Record<string, unknown>) {
     if (task.harness !== 'opencode') run.preview = new PreviewSession({ task, cwd: worktree.path, root: this.root, servicePort: this.servicePort, browser: this.browser });
-    if (task.harness === 'claude') return this.startClaude(run, task, worktree, instructions, prompt);
-    if (task.harness === 'opencode') return this.startOpencode(run, task, worktree, instructions, prompt);
-    return this.startCodex(run, task, worktree, instructions, prompt, overrides);
+    if (task.harness === 'claude') return this.startClaude(run, task, worktree, instructions, prompt, images);
+    if (task.harness === 'opencode') return this.startOpencode(run, task, worktree, instructions, prompt, images);
+    return this.startCodex(run, task, worktree, instructions, prompt, images, overrides);
   }
 
-  private async startCodex(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, overrides?: Record<string, unknown>) {
+  private async startCodex(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, images: PromptImage[], overrides?: Record<string, unknown>) {
     const { id, client } = run;
     const thread = await client.request('thread/start', { cwd: worktree.path, model: task.model, allowProviderModelFallback: false, sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'user', developerInstructions: instructions, config: overrides, dynamicTools: previewToolSpecs() });
     const policyApplied = thread.sandbox?.type === 'workspaceWrite' && !thread.sandbox.networkAccess && thread.approvalPolicy === 'on-request' && thread.approvalsReviewer === 'user' && thread.cwd === worktree.path && thread.model === task.model;
@@ -398,7 +409,8 @@ export class Runner {
     this.store.update(id, { threadId: run.threadId, status: 'running', instructionSources: thread.instructionSources ?? [], sandbox: sandbox(worktree.path) });
     ensureActive(run);
     this.store.event(id, 'running', 'Codex started', { harness: 'codex', model: task.model });
-    const response = await client.request('turn/start', { threadId: run.threadId, sandboxPolicy: sandbox(worktree.path), input: [{ type: 'text', text: prompt }] });
+    const input = [...images.map(image => ({ type: 'inputImage', imageUrl: dataUrl(image) })), { type: 'text', text: prompt }];
+    const response = await client.request('turn/start', { threadId: run.threadId, sandboxPolicy: sandbox(worktree.path), input });
     run.turnId = response.turn.id;
     this.store.update(id, { turnId: run.turnId });
   }
@@ -517,7 +529,7 @@ export class Runner {
     else if (item.type === 'fileChange') this.store.event(run.id, 'files', 'Changed files', { status: item.status, paths: (item.changes ?? []).map((change: { path: string }) => change.path) });
   }
 
-  private async startClaude(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string) {
+  private async startClaude(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, images: PromptImage[]) {
     const preview = run.preview;
     const mcpServers: Record<string, McpServerConfig> = preview ? { [factoryServerName]: factoryServer((name, input) => this.previewTool(run, preview, name, input)) } : {};
     const session = openClaude({ query: this.claudeQuery, cwd: worktree.path, model: task.model, instructions, mcpServers, canUseTool: (toolName, input, options) => this.claudeRequest(run, toolName, input, options) });
@@ -529,7 +541,7 @@ export class Runner {
     this.store.update(run.id, { status: 'running', agentPid: pid, sandbox: claudeSandbox });
     this.store.event(run.id, 'running', 'Claude started', { harness: 'claude', model: task.model });
     void this.pump(run, session.messages, message => this.handleClaudeMessage(run, message, worktree, model), 'Claude session ended without a result');
-    session.send(prompt);
+    session.send(prompt, images);
   }
 
   private async handleClaudeMessage(run: Run, message: SDKMessage, worktree: Worktree, model: ModelInfo) {
@@ -599,7 +611,7 @@ export class Runner {
     });
   }
 
-  private async startOpencode(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string) {
+  private async startOpencode(run: Run, task: Task, worktree: Worktree, instructions: string, prompt: string, images: PromptImage[]) {
     const session = await this.opencode({ root: this.root, runId: run.id, cwd: worktree.path, model: task.model, instructions });
     run.agent = session;
     ensureActive(run);
@@ -607,7 +619,7 @@ export class Runner {
     this.store.update(run.id, { status: 'running', agentPid: session.pid, agentPolicy: session.policy });
     this.store.event(run.id, 'running', 'OpenCode started', { harness: 'opencode', model: task.model, sandbox: session.policy.writable });
     void this.pump(run, session.events, event => this.handleOpencodeEvent(run, session, event), 'OpenCode stopped sending events before the turn finished');
-    await session.send(prompt);
+    await session.send(prompt, images);
   }
 
   private handleOpencodeEvent(run: Run, session: OpencodeSession, event: OpencodeEvent) {
@@ -762,7 +774,7 @@ export class Runner {
   }
 
   async retakePreview(id: string) {
-    if (this.active) throw new Error('Wait for the active run to finish before taking new screenshots');
+    if (this.runs.has(id)) throw new Error('Wait for this run to finish before taking new screenshots');
     const task = this.store.require(id);
     if (!task.worktree || task.worktreeRemoved || !task.candidate) throw new Error('This task has no worktree to preview');
     const preview = await capturePreview({ task, cwd: task.worktree.path, root: this.root, candidate: task.candidate, capture: this.capture, servicePort: this.servicePort });
@@ -788,8 +800,8 @@ export class Runner {
     run.client.close();
     run.pending.clear();
     await Promise.all(['.factory/cache/tmp', '.factory/sandbox'].map(directory => rm(join(this.root, directory, id), { recursive: true, force: true }))).catch(() => undefined);
-    // Releasing the runner and starting the automatic retry must happen in one synchronous step, or another task can claim the gap.
-    this.active = null;
+    // The automatic retry below starts this same task again, so the run has to be released first.
+    this.runs.delete(id);
     const task = this.store.require(id);
     if (!run.canceled && task.status === 'handoff' && task.preview?.status === 'captured') {
       void this.live?.start(id).catch((error: Error) => this.store.event(id, 'error', error.message));

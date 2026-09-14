@@ -22,7 +22,7 @@ flowchart TD
 4. The check runs offline for up to 2 minutes, recorded with its exit code and Git tree. A check that changes the tree fails.
 5. The patch is saved, screenshots are taken, and the app starts for review.
 
-One run is active at a time.
+Runs are parallel, one worktree each. A task can only run once at a time, and only one app runs live for review, since dev servers ask for the same ports.
 
 ## Checks
 

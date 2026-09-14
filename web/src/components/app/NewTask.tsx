@@ -1,17 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Autonomy, Harness } from '@shared/domain';
-import type { Repository, TaskImage } from '@shared/types';
+import type { Attachment, Repository } from '@shared/types';
 import { Button } from '@/components/atoms/Button';
 import { Collapse } from '@/components/atoms/Collapse';
 import { Chevron, Icon } from '@/components/atoms/Icon';
-import { uploadImage } from '@/lib/live';
+import { uploadAttachment } from '@/lib/live';
 import { fadeUp } from '@/lib/motion';
 import { usePromptHistory } from '@/lib/promptHistory';
-import { agents, autonomyModes, parseCommand, repoName } from '@/lib/tasks';
+import { agents, autonomyModes, fileSize, parseCommand, repoName } from '@/lib/tasks';
 import type { AgentState } from '@/lib/useFactory';
 import Menu from './Menu';
 
-const maxImages = 8;
+const maxAttachments = 8;
 const draftKey = 'factory-task-draft';
 const historyKey = 'factory-task-history';
 const minHeightPx = 132;
@@ -61,7 +61,7 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
   const [options, setOptions] = useState<Record<OptionKey, string>>({ title: '', setup: '', check: '' });
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const [images, setImages] = useState<TaskImage[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState('');
   const models = agent.probe?.harness === agent.harness ? agent.probe.models : [];
@@ -81,17 +81,16 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
   }, [draft]);
 
   async function attach(files: File[]) {
-    const pictures = files.filter(file => file.type.startsWith('image/'));
-    if (!pictures.length) return;
+    if (!files.length) return;
     setAttaching(true);
     setAttachError('');
     try {
-      const room = maxImages - images.length;
-      if (room <= 0) throw new Error(`Attach up to ${maxImages} images`);
-      const added = await Promise.all(pictures.slice(0, room).map(uploadImage));
-      setImages(current => [...current, ...added]);
+      const room = maxAttachments - attachments.length;
+      if (room <= 0) throw new Error(`Attach up to ${maxAttachments} files`);
+      const added = await Promise.all(files.slice(0, room).map(uploadAttachment));
+      setAttachments(current => [...current, ...added]);
     } catch (failure) {
-      setAttachError(failure instanceof Error ? failure.message : 'Could not attach that image');
+      setAttachError(failure instanceof Error ? failure.message : 'Could not attach that file');
     } finally {
       setAttaching(false);
     }
@@ -100,7 +99,7 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
   const ready = Boolean(draft.trim() && models.length && model && !busy);
   const submit = () => {
     if (!ready) return;
-    onCreate({ criteria: draft, repository: target, model, autonomy, harness: agent.harness, title: options.title, setup: parseCommand(options.setup), check: parseCommand(options.check), images: images.map(({ id, name }) => ({ id, name })) });
+    onCreate({ criteria: draft, repository: target, model, autonomy, harness: agent.harness, title: options.title, setup: parseCommand(options.setup), check: parseCommand(options.check), attachments: attachments.map(({ id, name }) => ({ id, name })) });
     history.record(draft);
     localStorage.removeItem(draftKey);
   };
@@ -151,32 +150,40 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
             placeholder="Describe the change and what success looks like."
             className="w-full resize-none bg-transparent px-2 py-1.5 text-[14px] leading-6 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3"
           />
-          {(images.length > 0 || attaching) && (
-            <div className="flex flex-wrap gap-1.5 px-1">
-              {images.map(image => (
-                <span key={image.id} className="group/thumb relative size-14 overflow-hidden rounded-[8px] bg-inset shadow-hairline">
-                  <img src={`/api/uploads/${image.id}`} alt={image.name} className="size-full object-cover" />
+          {(attachments.length > 0 || attaching) && (
+            <div className="flex flex-wrap items-center gap-1.5 px-1">
+              {attachments.map(attachment => (
+                <span key={attachment.id} className={`group/chip relative flex items-center overflow-hidden rounded-[8px] bg-inset shadow-hairline ${attachment.kind === 'image' ? 'size-14' : 'h-9 gap-1.5 pr-6 pl-2'}`}>
+                  {attachment.kind === 'image'
+                    ? <img src={`/api/uploads/${attachment.id}`} alt={attachment.name} className="size-full object-cover" />
+                    : (
+                      <>
+                        <Icon name="read" size={13} className="shrink-0 text-ink-3" />
+                        <span className="max-w-[150px] truncate text-[12px] text-ink-2" title={attachment.name}>{attachment.name}</span>
+                        <span className="shrink-0 text-[11px] text-ink-3">{fileSize(attachment.bytes)}</span>
+                      </>
+                    )}
                   <button
                     type="button"
-                    aria-label={`Remove ${image.name}`}
-                    onClick={() => setImages(current => current.filter(other => other.id !== image.id))}
-                    className="absolute top-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-canvas/85 text-ink-2 opacity-0 transition-opacity duration-150 group-hover/thumb:opacity-100 focus-visible:opacity-100"
+                    aria-label={`Remove ${attachment.name}`}
+                    onClick={() => setAttachments(current => current.filter(other => other.id !== attachment.id))}
+                    className="absolute top-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-canvas/85 text-ink-2 opacity-0 transition-opacity duration-150 group-hover/chip:opacity-100 focus-visible:opacity-100"
                   >
                     <Icon name="close" size={11} strokeWidth={2.4} />
                   </button>
                 </span>
               ))}
-              {attaching && <span className="flex size-14 items-center justify-center rounded-[8px] bg-inset text-[11px] text-ink-3">Adding</span>}
+              {attaching && <span className="flex h-9 items-center rounded-[8px] bg-inset px-2.5 text-[11px] text-ink-3">Adding</span>}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-1">
-            <input ref={picker} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={event => { attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
+            <input ref={picker} type="file" multiple hidden onChange={event => { attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
             <button
               type="button"
-              id="attach-image"
-              title="Attach an image, or paste one into the description"
-              aria-label="Attach an image"
-              disabled={images.length >= maxImages}
+              id="attach-file"
+              title="Attach an image or a text file, or paste one into the description"
+              aria-label="Attach a file"
+              disabled={attachments.length >= maxAttachments}
               onClick={() => picker.current?.click()}
               className="flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50"
             >

@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseCommand } from '../shared/commands';
-import type { CheckSource, Task } from '../shared/types';
+import type { CheckSource, PromptAttachment, Task } from '../shared/types';
 
 const commandsThatCannotFail = ['true', ':', 'echo', 'printf', 'exit'];
 const testFile = /(^|\/)tests?\/.+\.[cm]?js$|\.test\.[cm]?js$/;
@@ -59,9 +59,16 @@ const previewToolInstructions = 'To check interface changes before you finish, u
 export function taskPrompt(task: Task, setupRan: string[], followUp: boolean) {
   const setupNote = setupRan.length ? `Setup already ran in this worktree: ${setupRan.join(' ')}\n` : '';
   const tools = task.harness === 'opencode' ? '' : `\n${previewToolInstructions}`;
-  const images = task.images?.length ? `${task.images.length === 1 ? 'One image is' : `${task.images.length} images are`} attached to this message: ${task.images.map(image => image.name).join(', ')}.\n` : '';
-  const brief = `Task: ${task.title}\nWhat done looks like:\n${task.criteria}\n${images}${setupNote}${checkInstructions(task)}\n${previewInstructions}${tools}`;
+  const attached = task.attachments?.length ? `Attached to this message: ${task.attachments.map(attachment => attachment.name).join(', ')}.\n` : '';
+  const brief = `Task: ${task.title}\nWhat done looks like:\n${task.criteria}\n${attached}${setupNote}${checkInstructions(task)}\n${previewInstructions}${tools}`;
   return followUp ? `${brief}\n\n${followUpNote(task)}` : brief;
+}
+
+// Images ride along as parts of the message, and text files are quoted into it, since no agent here can open a file the factory holds.
+export function withAttachments(prompt: string, attachments: PromptAttachment[]) {
+  const files = attachments.filter(attachment => attachment.kind === 'text');
+  if (!files.length) return prompt;
+  return [prompt, ...files.map(file => `Attached file ${file.name}:\n\`\`\`\n${file.text}\n\`\`\``)].join('\n\n');
 }
 
 export const combineInstructions = (role: string, context: string) => [role.trim(), context].filter(Boolean).join('\n\n');

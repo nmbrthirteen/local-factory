@@ -1,4 +1,4 @@
-import type { ProgressEvent, TaskImage } from '@shared/types';
+import type { Attachment, ProgressEvent } from '@shared/types';
 
 const reconnectDelayMs = 1500;
 const staleAfterMs = 30_000;
@@ -12,8 +12,9 @@ export async function api<T = unknown>(path: string, body?: unknown, timeoutMs =
   return result;
 }
 
-export async function uploadImage(file: File): Promise<TaskImage> {
-  const response = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': file.type, 'X-Image-Name': encodeURIComponent(file.name) }, body: file });
+export async function uploadAttachment(file: File): Promise<Attachment> {
+  const headers = { 'Content-Type': file.type || 'text/plain', 'X-Attachment-Name': encodeURIComponent(file.name) };
+  const response = await fetch('/api/uploads', { method: 'POST', headers, body: file });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error);
   return result;

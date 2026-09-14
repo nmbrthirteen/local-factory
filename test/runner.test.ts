@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { git, inspectRepo } from '../backend/git';
 import type { Run } from '../backend/runner';
 import { Store } from '../backend/store';
+import { Uploads } from '../backend/uploads';
 import { fakeClaude } from './fake-claude';
 import { fakeOpencode } from './fake-opencode';
 import { createFixture, exitCheck, fileCheck, outputCheck } from './fixture';
@@ -54,6 +55,20 @@ test('two tasks run side by side in their own worktrees', async () => {
   expect(one.checkResult?.exitCode).toBe(0);
   expect(two.checkResult?.exitCode).toBe(0);
   expect(f.runner.runs.size).toBe(0);
+});
+
+test('a task carries its attachments into the prompt and the turn input', async () => {
+  const f = await fixture();
+  const uploads = new Uploads(f.root);
+  const png = await uploads.save(new Request('http://local/api/uploads', { method: 'POST', headers: { 'Content-Type': 'image/png', 'X-Attachment-Name': 'shot.png' }, body: new Blob(['\x89PNG\r\n\x1a\n']) }));
+  const csv = await uploads.save(new Request('http://local/api/uploads', { method: 'POST', headers: { 'Content-Type': 'text/csv', 'X-Attachment-Name': 'rows.csv' }, body: new Blob(['name,count\nfirst,2\n']) }));
+  const task = f.create({ criteria: 'RECORD_PROMPT with attachments', attachments: [png, csv] });
+  const result = await f.run(task.id);
+  expect(result.status).toBe('handoff');
+  const prompt = await readFile(`${result.worktree!.path}.prompts`, 'utf8');
+  expect(prompt).toContain('Attached to this message: shot.png, rows.csv.');
+  expect(prompt).toContain('Attached file rows.csv:');
+  expect(prompt).toContain('name,count');
 });
 
 test('cancel and duplicate start preserve a single attempt', async () => {

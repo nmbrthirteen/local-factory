@@ -3,9 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ApiServices } from '../backend/api';
-import { taskPrompt } from '../backend/checks';
+import { taskPrompt, withAttachments } from '../backend/checks';
 import { git } from '../backend/git';
 import { Store } from '../backend/store';
+import { Uploads } from '../backend/uploads';
 import type { FactoryState, Task } from '../shared/types';
 import { cleanupAfterEach, openSession, serveApi } from './support';
 
@@ -89,17 +90,25 @@ test('local API rejects cross-origin, unauthenticated and malformed requests, an
   expect(back.tasks.map(task => task.title)).toEqual(['Work in the first repository', 'Patch', 'Build the first working version']);
 
   const png = new Blob(['\x89PNG\r\n\x1a\n']);
-  const upload = (type: string, body: Blob) => fetch(`${base}/api/uploads`, { method: 'POST', headers: { Cookie: cookie, Origin: base, 'Content-Type': type, 'X-Image-Name': 'shot%20one.png' }, body });
-  expect((await upload('text/plain', png)).status).toBe(400);
+  const upload = (type: string, body: Blob, name = 'shot%20one.png') =>
+    fetch(`${base}/api/uploads`, { method: 'POST', headers: { Cookie: cookie, Origin: base, 'Content-Type': type, 'X-Attachment-Name': name }, body });
+  expect((await upload('application/zip', new Blob(['before\u0000after']))).status).toBe(400);
   const uploaded = await read<{ id: string; name: string; mediaType: string; bytes: number }>(await upload('image/png', png));
   expect(uploaded).toMatchObject({ name: 'shot one.png', mediaType: 'image/png', bytes: png.size });
   const served = await fetch(`${base}/api/uploads/${uploaded.id}`, { headers: { Cookie: cookie } });
   expect(served.headers.get('content-type')).toBe('image/png');
   expect((await fetch(`${base}/api/uploads/nope.png`, { headers: { Cookie: cookie } })).status).toBe(400);
-  expect((await post('/tasks', { criteria: 'With a missing image', harness: 'codex', model: 'default', images: [{ id: '00000000-0000-0000-0000-000000000000.png', name: 'gone.png' }] })).status).toBe(400);
-  const illustrated = await read<Task>(await post('/tasks', { criteria: 'With an image', harness: 'codex', model: 'default', images: [{ id: uploaded.id, name: uploaded.name }] }));
-  expect(illustrated.images).toEqual([{ id: uploaded.id, name: 'shot one.png', mediaType: 'image/png', bytes: png.size }]);
-  expect(taskPrompt(illustrated, [], false)).toContain('One image is attached to this message: shot one.png.');
+  expect((await post('/tasks', { criteria: 'With a missing image', harness: 'codex', model: 'default', attachments: [{ id: '00000000-0000-0000-0000-000000000000.png', name: 'gone.png' }] })).status).toBe(400);
+  const illustrated = await read<Task>(await post('/tasks', { criteria: 'With an image', harness: 'codex', model: 'default', attachments: [{ id: uploaded.id, name: uploaded.name }] }));
+  expect(illustrated.attachments).toEqual([{ id: uploaded.id, name: 'shot one.png', kind: 'image', mediaType: 'image/png', bytes: png.size }]);
+  expect(taskPrompt(illustrated, [], false)).toContain('Attached to this message: shot one.png.');
+
+  const notes = await read<{ id: string; kind: string }>(await upload('text/csv', new Blob(['name,count\nfirst,2\n']), 'rows.csv'));
+  expect(notes.kind).toBe('text');
+  const documented = await read<Task>(await post('/tasks', { criteria: 'With a file', harness: 'codex', model: 'default', attachments: [{ id: notes.id, name: 'rows.csv' }] }));
+  expect(documented.attachments).toEqual([{ id: notes.id, name: 'rows.csv', kind: 'text', mediaType: 'text/plain', bytes: 19 }]);
+  const loaded = await new Uploads(root).load(documented.attachments);
+  expect(withAttachments('Brief', loaded)).toBe('Brief\n\nAttached file rows.csv:\n```\nname,count\nfirst,2\n\n```');
 });
 
 test('preview routes return the recorded preview, serve its screenshots, and retake on request', async () => {

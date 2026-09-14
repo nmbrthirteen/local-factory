@@ -8,13 +8,13 @@ import { claudeSandbox, claudeTools, factoryServer, factoryServerName, isFactory
 import { Codex, isolatedConfig, sandbox, type CodexMessage } from './agents/codex';
 import { openOpencode, probeOpencode, type OpencodeEvent, type OpencodeSession, type OpenOpencode } from './agents/opencode';
 import { PreviewSession, previewToolSpecs, runPreviewTool } from './browser';
-import { combineInstructions, developerInstructions, resolveCheck, taskPrompt } from './checks';
+import { combineInstructions, developerInstructions, resolveCheck, taskPrompt, withAttachments } from './checks';
 import { baseTree, candidateTree, createWorktree, detectRecipe, exportPatch, inspectRepo, pathExists } from './git';
 import { loadInstructions } from './instructions';
 import type { LiveApps } from './live';
 import { capturePreview, previewSummary, type Browser, type Capture } from './preview';
 import type { Store } from './store';
-import { dataUrl, Uploads } from './uploads';
+import { dataUrl, isImage, Uploads } from './uploads';
 import { validAutonomy } from './validation';
 
 const maxAttempts = 3;
@@ -322,7 +322,8 @@ export class Runner {
       ensureActive(run);
       const setupRan = followUp ? task.setupResult?.command ?? [] : await this.runSetup(run, task, worktree);
       const instructions = await this.loadInstructions(task, worktree);
-      await this.startAgent(run, task, worktree, instructions, taskPrompt(task, setupRan, followUp), await this.uploads.load(task.images), overrides);
+      const attachments = await this.uploads.load(task.attachments);
+      await this.startAgent(run, task, worktree, instructions, withAttachments(taskPrompt(task, setupRan, followUp), attachments), attachments.filter(isImage), overrides);
       const turn = await run.turn;
       await run.preview?.close();
       ensureActive(run);

@@ -24,6 +24,7 @@ const taskGroups: [GroupId, string][] = [['attention', 'Needs you'], ['working',
 
 export const agentName = (harness?: Harness | null) => agents[harness ?? 'codex'].name;
 export const repoName = (path?: string | null) => (path ?? '').split('/').filter(Boolean).at(-1) ?? '';
+export const fileSize = (bytes: number) => (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
 const workingLabels = { preparing: 'Preparing', running: 'Working', checking: 'Running check', canceling: 'Stopping' };
 const pullRequestState = (task: TaskLike) => task.pullRequest?.state ?? task.pullRequestState ?? null;

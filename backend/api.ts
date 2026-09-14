@@ -178,7 +178,7 @@ export function createApi({ store, root, runner, ...services }: ApiServices) {
     const criteria = text(body.criteria, 'Description', 10_000);
     const input = {
       criteria,
-      images: await uploads.attach(body.images),
+      attachments: await uploads.attach(body.attachments),
       title: body.title?.trim() ? text(body.title, 'Title', 100) : titleFrom(criteria),
       harness: validHarness(body.harness),
       model: text(body.model, 'Model', 150),
@@ -281,8 +281,8 @@ export function createApi({ store, root, runner, ...services }: ApiServices) {
     const id = pathname.slice('/api/uploads/'.length);
     return async () => {
       const file = Bun.file(uploads.path(id));
-      if (!(await file.exists())) throw new HttpError(404, 'No image with that reference');
-      return new Response(file, { headers: { 'Content-Type': uploads.mediaType(id), 'Cache-Control': 'private, max-age=31536000, immutable' } });
+      if (!(await file.exists())) throw new HttpError(404, 'No attachment with that reference');
+      return new Response(file, { headers: { 'Content-Type': uploads.describe(id).mediaType, 'Cache-Control': 'private, max-age=31536000, immutable' } });
     };
   }
 
@@ -309,7 +309,7 @@ export function createApi({ store, root, runner, ...services }: ApiServices) {
     if (key === 'POST /api/session') return json(ok, 200, { 'Set-Cookie': `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/api` });
     if (!hasSession(request, token)) return json({ error: 'Reconnect to the local service' }, 401);
     try {
-      // The upload route reads the image bytes itself, so it is the one POST that skips JSON parsing.
+      // The upload route reads the file bytes itself, so it is the one POST that skips JSON parsing.
       const body = request.method === 'POST' && key !== 'POST /api/uploads' ? await readJson(request) : {};
       const handler = routes[key] ?? uploadRoute(request.method, url.pathname) ?? taskRoute(request.method, url.pathname);
       if (!handler) throw new HttpError(404, 'Unknown API route');

@@ -40,8 +40,10 @@ export type InstructionFile = { scope: 'global' | 'repository'; path: string; la
 export type PreviewShot = { name: 'desktop' | 'mobile'; width: number; height: number; path: string; bytes: number };
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
-export type TaskImage = { id: string; name: string; mediaType: ImageMediaType; bytes: number };
-export type PromptImage = TaskImage & { base64: string };
+export type Attachment = { id: string; name: string; kind: 'image' | 'text'; mediaType: string; bytes: number };
+export type PromptImage = Attachment & { kind: 'image'; mediaType: ImageMediaType; base64: string };
+export type PromptText = Attachment & { kind: 'text'; text: string };
+export type PromptAttachment = PromptImage | PromptText;
 
 export type LiveApp = { url: string; command: string[]; startedAt: string };
 
@@ -72,7 +74,7 @@ export type Task = {
   repo: Repository;
   setup: string[];
   check: string[];
-  images?: TaskImage[];
+  attachments?: Attachment[];
   createdAt: string;
   updatedAt?: string;
   startedAt?: string;
@@ -116,7 +118,7 @@ export type Task = {
   agentPolicy?: unknown;
 };
 
-export type NewTask = Pick<Task, 'title' | 'criteria' | 'model' | 'repo' | 'setup' | 'check'> & Partial<Pick<Task, 'harness' | 'autonomy' | 'worktree' | 'patch' | 'images'>>;
+export type NewTask = Pick<Task, 'title' | 'criteria' | 'model' | 'repo' | 'setup' | 'check'> & Partial<Pick<Task, 'harness' | 'autonomy' | 'worktree' | 'patch' | 'attachments'>>;
 
 export type TaskSummary = Pick<Task, 'id' | 'title' | 'status' | 'createdAt' | 'model' | 'harness' | 'settled'> & {
   repository: string;

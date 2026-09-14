@@ -72,7 +72,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
       return reply({ thread: { id: 'thread-1' }, cwd, model: params.model, sandbox: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'on-request', approvalsReviewer: 'user' });
     case 'turn/start':
       reply({ turn: { id: 'turn-1' } });
-      return startTurn(params.input[0].text);
+      return startTurn(params.input.map((item: { text?: string }) => item.text ?? '').join('\n'));
     case 'command/exec': {
       const result = await execute(params);
       if (!params.streamStdoutStderr) return reply(result);

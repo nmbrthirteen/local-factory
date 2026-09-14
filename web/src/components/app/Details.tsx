@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import type { Task } from '@shared/types';
 import { Button, buttonVariants } from '@/components/atoms/Button';
-import { agentName, rollbackTargets, taskActions } from '@/lib/tasks';
+import { Icon } from '@/components/atoms/Icon';
+import { agentName, fileSize, rollbackTargets, taskActions } from '@/lib/tasks';
 import Markdown from './Markdown';
 import StatusIcon from './StatusIcon';
 
@@ -40,11 +41,26 @@ export default function Details({ task, busy, locked, onRollback, onRemove }: De
         <section>
           <Heading>Task</Heading>
           <div className="text-[14px] leading-[1.65] text-ink [overflow-wrap:anywhere]"><Markdown text={task.criteria} /></div>
-          {task.images && task.images.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {task.images.map(image => (
-                <a key={image.id} href={`/api/uploads/${image.id}`} target="_blank" rel="noreferrer" title={image.name} className="block size-20 shrink-0 cursor-zoom-in overflow-hidden rounded-[10px] bg-inset shadow-hairline">
-                  <img src={`/api/uploads/${image.id}`} alt={image.name} loading="lazy" className="size-full object-cover" />
+          {task.attachments && task.attachments.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {task.attachments.map(attachment => (
+                <a
+                  key={attachment.id}
+                  href={`/api/uploads/${attachment.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={attachment.name}
+                  className={`flex shrink-0 items-center overflow-hidden rounded-[10px] bg-inset shadow-hairline ${attachment.kind === 'image' ? 'size-20 cursor-zoom-in' : 'h-10 gap-2 px-3 hover:bg-hover-2'}`}
+                >
+                  {attachment.kind === 'image'
+                    ? <img src={`/api/uploads/${attachment.id}`} alt={attachment.name} loading="lazy" className="size-full object-cover" />
+                    : (
+                      <>
+                        <Icon name="read" size={14} className="shrink-0 text-ink-3" />
+                        <span className="max-w-[220px] truncate text-[12.5px] text-ink">{attachment.name}</span>
+                        <span className="shrink-0 text-[11.5px] text-ink-3">{fileSize(attachment.bytes)}</span>
+                      </>
+                    )}
                 </a>
               ))}
             </div>

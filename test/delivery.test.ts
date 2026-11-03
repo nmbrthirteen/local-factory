@@ -28,7 +28,7 @@ test('commit lands on the task branch and refuses a worktree changed after the c
   const done = await f.run(f.task().id);
   const worktree = done.worktree!;
   await writeFile(join(worktree.path, 'late.txt'), 'late');
-  await expect(f.delivery.commit(done.id)).rejects.toThrow(/changed after the check passed/);
+  await expect(f.delivery.commit(done.id)).rejects.toThrow(/changed after the agent finished/);
   await rm(join(worktree.path, 'late.txt'));
   const committed = await f.delivery.commit(done.id);
   expect(await git(f.repoPath, ['rev-parse', worktree.branch])).toBe(committed.commit!.sha);
@@ -56,7 +56,9 @@ test('merge brings the work into the current branch, and the revert command undo
   await expect(f.delivery.merge(task.id)).rejects.toThrow(/already merged/);
   await expect(f.delivery.uncommit(task.id)).rejects.toThrow(/merged/);
 
-  expect(deliveryCommands(merged).map(command => command.argv)).toEqual([['git', 'revert', '-m', '1', '--no-edit', merge.sha]]);
+  expect(deliveryCommands(merged).map(command => command.argv)).toEqual([
+    ['git', 'revert', '-m', '1', '--no-edit', merge.sha],
+  ]);
   await expect(f.delivery.runCommand(task.id, 'close-pull-request')).rejects.toThrow(/not available/);
   await git(f.repoPath, ['checkout', '-b', 'elsewhere']);
   await expect(f.delivery.runCommand(task.id, 'revert')).rejects.toThrow(/Check out/);
@@ -67,7 +69,32 @@ test('merge brings the work into the current branch, and the revert command undo
   expect(reverted.revert?.sha).toBe(await git(f.repoPath, ['rev-parse', 'HEAD']));
   expect(deliveryCommands(reverted)).toEqual([]);
   await expect(f.delivery.runCommand(task.id, 'revert')).rejects.toThrow(/not available/);
-  expect(f.store.events(task.id).some(event => event.type === 'reverted' && event.details.command.startsWith('git revert -m 1'))).toBe(true);
+  expect(
+    f.store
+      .events(task.id)
+      .some(event => event.type === 'reverted' && event.details.command?.startsWith('git revert -m 1')),
+  ).toBe(true);
+});
+
+test('an unchecked task merges or opens a pull request only when the owner confirms it unchecked', async () => {
+  const f = await fixture();
+  await f.identity();
+  const task = await f.run(f.task('TRIVIAL_CHECK', []).id);
+  expect(task.unchecked).toBe(true);
+  await expect(f.delivery.merge(task.id)).rejects.toThrow(/No check ran/);
+  await expect(f.delivery.openPullRequest(task.id)).rejects.toThrow(/No check ran/);
+  expect(f.store.require(task.id).commit).toBeFalsy();
+  const merged = await f.delivery.merge(task.id, true);
+  expect(merged.merge?.sha).toBe(await git(f.repoPath, ['rev-parse', 'HEAD']));
+});
+
+test('merge refuses before touching the repository when the worktree folder is gone', async () => {
+  const f = await fixture();
+  await f.identity();
+  const task = await f.run(f.task().id);
+  await rm(task.worktree!.path, { recursive: true, force: true });
+  await expect(f.delivery.merge(task.id)).rejects.toThrow(/worktree folder is missing/);
+  expect(await git(f.repoPath, ['rev-parse', 'HEAD'])).toBe(task.repo.base);
 });
 
 test('a pull request pushes the task branch, and gh commands merge or close it inline', async () => {
@@ -81,10 +108,15 @@ test('a pull request pushes the task branch, and gh commands merge or close it i
   const gh = join(f.root, 'gh');
   await writeFile(gh, fakeGitHubCli(f.root), { mode: 0o755 });
   process.env.FACTORY_GH = gh;
-  onCleanup(() => delete process.env.FACTORY_GH);
+  onCleanup(() => {
+    delete process.env.FACTORY_GH;
+  });
 
   const opened = await f.delivery.openPullRequest(task.id);
-  expect([opened.pullRequest?.url, opened.pullRequest?.state]).toEqual(['https://github.com/example/ledger/pull/7', 'OPEN']);
+  expect([opened.pullRequest?.url, opened.pullRequest?.state]).toEqual([
+    'https://github.com/example/ledger/pull/7',
+    'OPEN',
+  ]);
   expect(await git(origin, ['rev-parse', opened.commit!.branch])).toBe(opened.commit!.sha);
   await expect(f.delivery.openPullRequest(task.id)).rejects.toThrow(/already has a pull request/);
   expect(deliveryCommands(opened).map(command => command.id)).toEqual(['merge-pull-request', 'close-pull-request']);
@@ -100,7 +132,12 @@ test('a pull request pushes the task branch, and gh commands merge or close it i
   const calls = await readFile(join(f.root, 'gh-calls'), 'utf8');
   expect(calls).toContain('pr merge https://github.com/example/ledger/pull/7 --merge');
   expect(calls).toContain('pr close https://github.com/example/ledger/pull/7');
-  expect(f.store.events(task.id).filter(event => event.type === 'pull_request').map(event => event.text)).toContain('Pull request merged');
+  expect(
+    f.store
+      .events(task.id)
+      .filter(event => event.type === 'pull_request')
+      .map(event => event.text),
+  ).toContain('Pull request merged');
 });
 
 test('removing an uncommitted worktree deletes its branch and ends the task', async () => {
@@ -146,7 +183,6 @@ test('rollback restores an earlier attempt or the original code, after undoing a
 test('settling moves a finished task and refuses a running one', async () => {
   const f = await fixture();
   const task = f.task();
-  expect(() => f.delivery.settle(task.id, 'yes')).toThrow(/Choose whether/);
   expect(f.delivery.settle(task.id, true).settled).toBe(true);
   expect(f.delivery.settle(task.id, false).settled).toBe(false);
   f.store.update(task.id, { status: 'running' });

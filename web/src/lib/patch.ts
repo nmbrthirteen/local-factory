@@ -1,5 +1,14 @@
 type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'context'; text: string; oldLine?: number; newLine?: number };
-export type DiffFile = { path: string; from: string; state: 'modified' | 'renamed' | 'added' | 'deleted'; additions: number; deletions: number; binary?: boolean; lines: DiffLine[] };
+
+export type DiffFile = {
+  path: string;
+  from: string;
+  state: 'modified' | 'renamed' | 'added' | 'deleted';
+  additions: number;
+  deletions: number;
+  binary?: boolean;
+  lines: DiffLine[];
+};
 
 const fileHeader = /^diff --git a\/(.*) b\/(.*)$/;
 const hunkHeader = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
@@ -9,14 +18,25 @@ export function parsePatch(text: string) {
   let file: DiffFile | undefined;
   let oldLine = 0;
   let newLine = 0;
+
   for (const line of text.split('\n')) {
     const header = line.match(fileHeader);
+
     if (header) {
-      file = { path: header[2], from: header[1], state: header[1] === header[2] ? 'modified' : 'renamed', additions: 0, deletions: 0, lines: [] };
+      file = {
+        path: header[2],
+        from: header[1],
+        state: header[1] === header[2] ? 'modified' : 'renamed',
+        additions: 0,
+        deletions: 0,
+        lines: [],
+      };
       files.push(file);
       continue;
     }
+
     if (!file) continue;
+
     if (line.startsWith('new file mode')) file.state = 'added';
     else if (line.startsWith('deleted file mode')) file.state = 'deleted';
     else if (line.startsWith('Binary files')) file.binary = true;
@@ -36,5 +56,6 @@ export function parsePatch(text: string) {
       file.lines.push({ kind: 'context', oldLine: oldLine++, newLine: newLine++, text: line.slice(1) });
     }
   }
+
   return files;
 }

@@ -4,17 +4,21 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { activeStates } from '../shared/domain';
-import type { NewTask, Task, TaskEvent } from '../shared/types';
+import type { EventDetails, NewTask, Task, TaskEvent } from '../shared/types';
 import { Progress } from './progress';
-import { statusIn, taskPage, type TaskPageOptions } from './task-list';
+import { statusIn, type TaskPageOptions, taskPage } from './task-list';
 
 export const eventPageSize = 200;
 
 type Row = { data: string };
+
 type EventRow = Row & { id: number };
 
 const now = () => new Date().toISOString();
 const parse = <T>(row: Row | null): T | null => (row ? JSON.parse(row.data) : null);
+
+// Rows are written by this store from Task values, so reading one back needs no further parsing.
+const readTask = (row: Row): Task => JSON.parse(row.data);
 const toEvent = (row: EventRow): TaskEvent => ({ ...JSON.parse(row.data), id: row.id });
 
 export class Store extends EventEmitter {
@@ -25,25 +29,35 @@ export class Store extends EventEmitter {
   constructor(path: string) {
     super();
     this.setMaxListeners(0);
+
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new Database(path, { create: true, strict: true });
     this.db.run('PRAGMA journal_mode = WAL');
     this.db.run('CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL)');
-    this.db.run('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, data TEXT NOT NULL)');
+    this.db.run(
+      'CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, data TEXT NOT NULL)',
+    );
     this.db.run('CREATE INDEX IF NOT EXISTS events_task ON events(task_id, id)');
     this.db.run('CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data TEXT NOT NULL)');
   }
 
   list() {
-    return this.db.query<Row, []>('SELECT data FROM tasks ORDER BY rowid DESC').all().map(row => JSON.parse(row.data) as Task);
+    return this.db.query<Row, []>('SELECT data FROM tasks ORDER BY rowid DESC').all().map(readTask);
   }
 
   activeTasks() {
-    return this.db.query<Row, []>(`SELECT data FROM tasks WHERE ${statusIn(activeStates)} ORDER BY rowid DESC`).all().map(row => JSON.parse(row.data) as Task);
+    return this.db
+      .query<Row, []>(`SELECT data FROM tasks WHERE ${statusIn(activeStates)} ORDER BY rowid DESC`)
+      .all()
+      .map(readTask);
   }
 
   attentionCount() {
-    return this.db.query<{ count: number }, []>("SELECT count(*) AS count FROM tasks WHERE status = 'awaiting_approval'").get()?.count ?? 0;
+    return (
+      this.db
+        .query<{ count: number }, []>("SELECT count(*) AS count FROM tasks WHERE status = 'awaiting_approval'")
+        .get()?.count ?? 0
+    );
   }
 
   taskPage(options: TaskPageOptions) {
@@ -56,7 +70,9 @@ export class Store extends EventEmitter {
 
   require(id: string) {
     const task = this.get(id);
+
     if (!task) throw new Error('Task not found');
+
     return task;
   }
 
@@ -64,6 +80,7 @@ export class Store extends EventEmitter {
     const task: Task = { ...input, id: randomUUID(), status: 'queued', createdAt: now() };
     this.db.query('INSERT INTO tasks VALUES (?, ?, ?)').run(task.id, task.status, JSON.stringify(task));
     this.event(task.id, 'queued', 'Saved');
+
     return task;
   }
 
@@ -71,30 +88,46 @@ export class Store extends EventEmitter {
     const task: Task = { ...this.require(id), ...patch, updatedAt: now() };
     this.db.query('UPDATE tasks SET status = ?, data = ? WHERE id = ?').run(task.status, JSON.stringify(task), id);
     this.changed();
+
     return task;
   }
 
   claim(id: string, allowed: readonly string[]) {
-    this.db.transaction(() => {
-      const task = this.get(id);
-      if (!task || !allowed.includes(task.status)) throw new Error('This task cannot start from its current state');
-      this.update(id, { status: 'preparing', startedAt: now() });
-    }).immediate();
+    this.db
+      .transaction(() => {
+        const task = this.get(id);
+
+        if (!task || !allowed.includes(task.status)) throw new Error('This task cannot start from its current state');
+        this.update(id, { status: 'preparing', startedAt: now() });
+      })
+      .immediate();
   }
 
-  event(id: string, type: string, text: string, details: Record<string, unknown> = {}): TaskEvent {
+  event(id: string, type: string, text: string, details: EventDetails = {}): TaskEvent {
     const data = { type, text: String(text).slice(0, 12_000), details, at: now() };
     const result = this.db.query('INSERT INTO events (task_id, data) VALUES (?, ?)').run(id, JSON.stringify(data));
     this.changed();
+
     return { ...data, id: Number(result.lastInsertRowid) };
   }
 
   events(id: string, after = 0) {
-    return this.db.query<EventRow, [string, number]>(`SELECT id, data FROM events WHERE task_id = ? AND id > ? ORDER BY id LIMIT ${eventPageSize}`).all(id, after).map(toEvent);
+    return this.db
+      .query<EventRow, [string, number]>(
+        `SELECT id, data FROM events WHERE task_id = ? AND id > ? ORDER BY id LIMIT ${eventPageSize}`,
+      )
+      .all(id, after)
+      .map(toEvent);
   }
 
   latestEvents(id: string) {
-    return this.db.query<EventRow, [string]>(`SELECT id, data FROM events WHERE task_id = ? ORDER BY id DESC LIMIT ${eventPageSize}`).all(id).reverse().map(toEvent);
+    return this.db
+      .query<EventRow, [string]>(
+        `SELECT id, data FROM events WHERE task_id = ? ORDER BY id DESC LIMIT ${eventPageSize}`,
+      )
+      .all(id)
+      .reverse()
+      .map(toEvent);
   }
 
   hasEventsAfter(id: string, after: number) {
@@ -104,6 +137,7 @@ export class Store extends EventEmitter {
   *eventLog(id: string) {
     // A fresh statement per download, so two concurrent downloads never share one cursor.
     const statement = this.db.prepare<EventRow, [string]>('SELECT id, data FROM events WHERE task_id = ? ORDER BY id');
+
     try {
       for (const row of statement.iterate(id)) yield `${JSON.stringify(toEvent(row))}\n`;
     } finally {
@@ -113,9 +147,12 @@ export class Store extends EventEmitter {
 
   setting<T>(id: string, value?: T): T | null {
     if (value !== undefined) {
-      this.db.query('INSERT INTO settings VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data').run(id, JSON.stringify(value));
+      this.db
+        .query('INSERT INTO settings VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+        .run(id, JSON.stringify(value));
       this.changed();
     }
+
     return parse<T>(this.db.query<Row, [string]>('SELECT data FROM settings WHERE id = ?').get(id));
   }
 

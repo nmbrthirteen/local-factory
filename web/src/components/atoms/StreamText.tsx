@@ -10,7 +10,15 @@ type StreamTextProps = {
   onDone?: () => void;
 };
 
-export function StreamText({ text, charsPerTick = 2, tickMs = 9, blurTail = 6, className, onProgress, onDone }: StreamTextProps) {
+export function StreamText({
+  text,
+  charsPerTick = 2,
+  tickMs = 9,
+  blurTail = 6,
+  className,
+  onProgress,
+  onDone,
+}: StreamTextProps) {
   const [count, setCount] = useState(0);
   const progress = useEffectEvent(() => onProgress?.());
   const done = useEffectEvent(() => onDone?.());
@@ -18,14 +26,17 @@ export function StreamText({ text, charsPerTick = 2, tickMs = 9, blurTail = 6, c
   useEffect(() => {
     setCount(0);
     let shown = 0;
+
     const timer = setInterval(() => {
       shown = Math.min(shown + charsPerTick, text.length);
       setCount(shown);
       progress();
+
       if (shown < text.length) return;
       clearInterval(timer);
       done();
     }, tickMs);
+
     return () => clearInterval(timer);
   }, [text, charsPerTick, tickMs]);
 

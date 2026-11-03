@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { Task, TaskSummary } from '@shared/types';
+import { type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '@/lib/live';
 import { popIn } from '@/lib/motion';
 import { agentName, ago, autonomyModes, checkSummary, repoName, taskState } from '@/lib/tasks';
@@ -14,10 +14,13 @@ const gap = 8;
 const margin = 12;
 
 type Anchor = { task: TaskSummary; top: number; left: number };
+
 type Cached = { version: string; task: Task };
 
 // A summary row carries no update time, so these fields decide whether a cached detail is stale.
-const version = (task: TaskSummary) => [task.status, task.settled, task.merged, task.pullRequestState, task.worktreeRemoved].join(':');
+const version = (task: TaskSummary) =>
+  [task.status, task.settled, task.merged, task.pullRequestState, task.worktreeRemoved].join(':');
+
 const changeSummary = (stat?: string) => stat?.trim().split('\n').at(-1)?.trim() ?? '';
 
 function Row({ term, children }: { term: string; children: ReactNode }) {
@@ -46,23 +49,43 @@ function Card({ anchor, detail }: { anchor: Anchor; detail: Task | null }) {
   const permissions = detail ? autonomyModes.find(mode => mode.value === (detail.autonomy ?? 'ask'))?.name : '';
 
   return (
-    <div ref={panel} id="task-peek" role="tooltip" className="pointer-events-none fixed z-50 rounded-card bg-surface p-3 shadow-overlay" style={{ top, left: anchor.left, width: cardWidth, ...popIn(160, 'left top') }}>
+    <div
+      ref={panel}
+      id="task-peek"
+      role="tooltip"
+      className="pointer-events-none fixed z-50 rounded-card bg-surface p-3 shadow-overlay"
+      style={{ top, left: anchor.left, width: cardWidth, ...popIn(160, 'left top') }}
+    >
       <div className="flex items-center gap-1.5 text-[12px]">
         <StatusIcon kind={state.kind} size={14} />
         <span className="font-medium text-ink">{state.label}</span>
-        <time dateTime={task.createdAt} className="ml-auto tabular-nums text-ink-3">{ago(task.createdAt)}</time>
+        <time dateTime={task.createdAt} className="ml-auto tabular-nums text-ink-3">
+          {ago(task.createdAt)}
+        </time>
       </div>
-      <p className="mt-2 line-clamp-4 text-[13.5px] leading-snug font-medium text-ink [overflow-wrap:anywhere]">{task.title}</p>
+      <p className="mt-2 line-clamp-4 text-[13.5px] leading-snug font-medium text-ink [overflow-wrap:anywhere]">
+        {task.title}
+      </p>
       <dl className="mt-2.5 grid grid-cols-[80px_minmax(0,1fr)] gap-x-2 gap-y-1 text-[12px]">
-        <Row term="Agent">{agentName(task.harness)} · {task.model}</Row>
+        <Row term="Agent">
+          {agentName(task.harness)} · {task.model}
+        </Row>
         <Row term="Repository">{repoName(task.repository)}</Row>
         {detail && (detail.attempt ?? 1) > 1 && <Row term="Attempt">{detail.attempt}</Row>}
         {permissions && <Row term="Permissions">{permissions}</Row>}
         {check && <Row term="Check">{check.command ? `${check.title} · ${check.command}` : check.title}</Row>}
-        {branch && <Row term="Branch"><span className="font-mono text-[11.5px]">{branch}</span></Row>}
+        {branch && (
+          <Row term="Branch">
+            <span className="font-mono text-[11.5px]">{branch}</span>
+          </Row>
+        )}
         {changes && <Row term="Changes">{changes}</Row>}
       </dl>
-      {detail?.feedback && <p className="mt-2.5 line-clamp-2 border-t border-line pt-2 text-[12px] text-ink-2 [overflow-wrap:anywhere]">Your note: {detail.feedback}</p>}
+      {detail?.feedback && (
+        <p className="mt-2.5 line-clamp-2 border-t border-line pt-2 text-[12px] text-ink-2 [overflow-wrap:anywhere]">
+          Your note: {detail.feedback}
+        </p>
+      )}
       {!detail && <p className="mt-2 text-[11.5px] text-ink-3">Loading details…</p>}
     </div>
   );
@@ -80,6 +103,7 @@ export function useTaskPeek() {
     const hide = () => setAnchor(null);
     document.addEventListener('scroll', hide, true);
     window.addEventListener('blur', hide);
+
     return () => {
       document.removeEventListener('scroll', hide, true);
       window.removeEventListener('blur', hide);
@@ -94,9 +118,12 @@ export function useTaskPeek() {
     const { task } = anchor;
     let current = true;
     api<{ task: Task }>(`/tasks/${task.id}?events=0`).then(
-      result => current && setDetails(previous => new Map(previous).set(task.id, { version: version(task), task: result.task })),
+      result =>
+        current &&
+        setDetails(previous => new Map(previous).set(task.id, { version: version(task), task: result.task })),
       () => undefined,
     );
+
     return () => {
       current = false;
     };
@@ -107,12 +134,15 @@ export function useTaskPeek() {
       if (matchMedia('(hover: none)').matches) return;
       const row = event.currentTarget;
       clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        if (row.querySelector('[aria-expanded="true"]')) return;
-        const rect = row.getBoundingClientRect();
-        const sidebarRight = row.closest('aside')?.getBoundingClientRect().right ?? rect.right;
-        setAnchor({ task, top: rect.top, left: Math.min(sidebarRight + gap, innerWidth - cardWidth - margin) });
-      }, anchor ? switchDelayMs : openDelayMs);
+      timer.current = setTimeout(
+        () => {
+          if (row.querySelector('[aria-expanded="true"]')) return;
+          const rect = row.getBoundingClientRect();
+          const sidebarRight = row.closest('aside')?.getBoundingClientRect().right ?? rect.right;
+          setAnchor({ task, top: rect.top, left: Math.min(sidebarRight + gap, innerWidth - cardWidth - margin) });
+        },
+        anchor ? switchDelayMs : openDelayMs,
+      );
     },
     onMouseLeave: () => {
       clearTimeout(timer.current);
@@ -124,7 +154,10 @@ export function useTaskPeek() {
     },
   });
 
-  return { bind, card: anchor && createPortal(<Card key={anchor.task.id} anchor={anchor} detail={detail} />, document.body) };
+  return {
+    bind,
+    card: anchor && createPortal(<Card key={anchor.task.id} anchor={anchor} detail={detail} />, document.body),
+  };
 }
 
 export type PeekBind = ReturnType<typeof useTaskPeek>['bind'];

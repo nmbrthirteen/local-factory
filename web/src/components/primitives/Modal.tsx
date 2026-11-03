@@ -1,15 +1,24 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { popIn } from '@/lib/motion';
 
 type ModalProps = { open: boolean; label: string; onClose: () => void; children: ReactNode; className?: string };
 
-export default function Modal({ open, label, onClose, children, className = 'w-[min(440px,calc(100vw-32px))]' }: ModalProps) {
+export default function Modal({
+  open,
+  label,
+  onClose,
+  children,
+  className = 'w-[min(440px,calc(100vw-32px))]',
+}: ModalProps) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     const node = dialog.current;
+
     if (!node) return;
+
     if (open && !node.open) node.showModal();
+
     if (!open && node.open) node.close();
   }, [open]);
 

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Autonomy, Harness } from '@shared/domain';
+import { type Autonomy, isHarness } from '@shared/domain';
+import type { JsonObject } from '@shared/json';
 import type { Attachment, Repository } from '@shared/types';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/atoms/Button';
 import { Collapse } from '@/components/atoms/Collapse';
 import { Chevron, Icon } from '@/components/atoms/Icon';
@@ -16,7 +17,10 @@ const draftKey = 'factory-task-draft';
 const historyKey = 'factory-task-history';
 const minHeightPx = 132;
 const maxHeightPx = 360;
-const field = 'h-9 w-full rounded-[8px] bg-field px-2.5 text-[13px] text-ink shadow-hairline outline-none transition-shadow placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]';
+
+const field =
+  'h-9 w-full rounded-[8px] bg-field px-2.5 text-[13px] text-ink shadow-hairline outline-none transition-shadow placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]';
+
 const optionFields = [
   ['title', 'Title', 'Taken from the first line of the description'],
   ['setup', 'Setup command', 'Found from the lockfile, such as npm ci'],
@@ -26,12 +30,20 @@ const optionFields = [
 type OptionKey = (typeof optionFields)[number][0];
 
 function AgentStatus({ agent }: { agent: AgentState }) {
-  const info = agents[agent.harness as Harness];
+  const info = isHarness(agent.harness) ? agents[agent.harness] : undefined;
+
   if (agent.error) return <span className="text-red">{agent.error}</span>;
+
   if (!agent.probe) return <span>Checking {info?.name ?? 'agent'} sign-in…</span>;
-  if (!agent.probe.authenticated) return <span className="text-orange">Sign in first: run {agents[agent.probe.harness].signIn}</span>;
+
+  if (!agent.probe.authenticated)
+    return <span className="text-orange">Sign in first: run {agents[agent.probe.harness].signIn}</span>;
+
   return (
-    <span title={`${agent.probe.version}${agent.probe.account ? ` · ${agent.probe.account}` : ''}`} className="inline-flex items-center gap-1.5">
+    <span
+      title={`${agent.probe.version}${agent.probe.account ? ` · ${agent.probe.account}` : ''}`}
+      className="inline-flex items-center gap-1.5"
+    >
       <span className="size-1.5 rounded-full bg-green" />
       Ready
     </span>
@@ -48,10 +60,21 @@ type NewTaskProps = {
   onModel: (model: string) => void;
   onReprobe: () => void;
   onCancel: () => void;
-  onCreate: (task: Record<string, unknown>) => void;
+  onCreate: (task: JsonObject) => void;
 };
 
-export default function NewTask({ agent, busy, repository, repositories, preferredModel, onAgent, onModel, onReprobe, onCancel, onCreate }: NewTaskProps) {
+export default function NewTask({
+  agent,
+  busy,
+  repository,
+  repositories,
+  preferredModel,
+  onAgent,
+  onModel,
+  onReprobe,
+  onCancel,
+  onCreate,
+}: NewTaskProps) {
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? '');
   const history = usePromptHistory(historyKey);
   const [target, setTarget] = useState(repository.path);
@@ -75,6 +98,7 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
   }, [models, model, preferredModel]);
   useLayoutEffect(() => {
     const node = input.current;
+
     if (!node) return;
     node.style.height = '0px';
     node.style.height = `${Math.min(Math.max(node.scrollHeight, minHeightPx), maxHeightPx)}px`;
@@ -84,8 +108,10 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
     if (!files.length) return;
     setAttaching(true);
     setAttachError('');
+
     try {
       const room = maxAttachments - attachments.length;
+
       if (room <= 0) throw new Error(`Attach up to ${maxAttachments} files`);
       const added = await Promise.all(files.slice(0, room).map(uploadAttachment));
       setAttachments(current => [...current, ...added]);
@@ -97,9 +123,20 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
   }
 
   const ready = Boolean(draft.trim() && models.length && model && !busy);
+
   const submit = () => {
     if (!ready) return;
-    onCreate({ criteria: draft, repository: target, model, autonomy, harness: agent.harness, title: options.title, setup: parseCommand(options.setup), check: parseCommand(options.check), attachments: attachments.map(({ id, name }) => ({ id, name })) });
+    onCreate({
+      criteria: draft,
+      repository: target,
+      model,
+      autonomy,
+      harness: agent.harness,
+      title: options.title,
+      setup: parseCommand(options.setup),
+      check: parseCommand(options.check),
+      attachments: attachments.map(({ id, name }) => ({ id, name })),
+    });
     history.record(draft);
     localStorage.removeItem(draftKey);
   };
@@ -118,6 +155,7 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
             event.preventDefault();
             onCancel();
           }
+
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             submit();
@@ -153,16 +191,25 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
           {(attachments.length > 0 || attaching) && (
             <div className="flex flex-wrap items-center gap-1.5 px-1">
               {attachments.map(attachment => (
-                <span key={attachment.id} className={`group/chip relative flex items-center overflow-hidden rounded-[8px] bg-inset shadow-hairline ${attachment.kind === 'image' ? 'size-14' : 'h-9 gap-1.5 pr-6 pl-2'}`}>
-                  {attachment.kind === 'image'
-                    ? <img src={`/api/uploads/${attachment.id}`} alt={attachment.name} className="size-full object-cover" />
-                    : (
-                      <>
-                        <Icon name="read" size={13} className="shrink-0 text-ink-3" />
-                        <span className="max-w-[150px] truncate text-[12px] text-ink-2" title={attachment.name}>{attachment.name}</span>
-                        <span className="shrink-0 text-[11px] text-ink-3">{fileSize(attachment.bytes)}</span>
-                      </>
-                    )}
+                <span
+                  key={attachment.id}
+                  className={`group/chip relative flex items-center overflow-hidden rounded-[8px] bg-inset shadow-hairline ${attachment.kind === 'image' ? 'size-14' : 'h-9 gap-1.5 pr-6 pl-2'}`}
+                >
+                  {attachment.kind === 'image' ? (
+                    <img
+                      src={`/api/uploads/${attachment.id}`}
+                      alt={attachment.name}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <>
+                      <Icon name="read" size={13} className="shrink-0 text-ink-3" />
+                      <span className="max-w-[150px] truncate text-[12px] text-ink-2" title={attachment.name}>
+                        {attachment.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-ink-3">{fileSize(attachment.bytes)}</span>
+                    </>
+                  )}
                   <button
                     type="button"
                     aria-label={`Remove ${attachment.name}`}
@@ -173,11 +220,24 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
                   </button>
                 </span>
               ))}
-              {attaching && <span className="flex h-9 items-center rounded-[8px] bg-inset px-2.5 text-[11px] text-ink-3">Adding</span>}
+              {attaching && (
+                <span className="flex h-9 items-center rounded-[8px] bg-inset px-2.5 text-[11px] text-ink-3">
+                  Adding
+                </span>
+              )}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-1">
-            <input ref={picker} type="file" multiple hidden onChange={event => { attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={event => {
+                attach([...(event.target.files ?? [])]);
+                event.target.value = '';
+              }}
+            />
             <button
               type="button"
               id="attach-file"
@@ -189,8 +249,22 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
             >
               <Icon name="image" size={15} />
             </button>
-            <Menu label="Repository" value={target} onChange={setTarget} options={repositories.map(repo => ({ value: repo.path, name: repoName(repo.path), description: repo.path }))} />
-            <Menu label="Agent" value={agent.harness} onChange={onAgent} options={Object.entries(agents).map(([value, { name }]) => ({ value, name }))} />
+            <Menu
+              label="Repository"
+              value={target}
+              onChange={setTarget}
+              options={repositories.map(repo => ({
+                value: repo.path,
+                name: repoName(repo.path),
+                description: repo.path,
+              }))}
+            />
+            <Menu
+              label="Agent"
+              value={agent.harness}
+              onChange={onAgent}
+              options={Object.entries(agents).map(([value, { name }]) => ({ value, name }))}
+            />
             <Menu
               label="Model"
               value={model}
@@ -198,7 +272,12 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
                 setModel(next);
                 onModel(next);
               }}
-              options={models.map(option => ({ value: option.id, name: option.name, description: option.detail ? `Runs ${option.detail}` : undefined, tag: option.isDefault ? 'Default' : undefined }))}
+              options={models.map(option => ({
+                value: option.id,
+                name: option.name,
+                description: option.detail ? `Runs ${option.detail}` : undefined,
+                tag: option.isDefault ? 'Default' : undefined,
+              }))}
             />
             <Menu label="Permissions" value={autonomy} onChange={setAutonomy} options={autonomyModes} />
             <button
@@ -206,7 +285,10 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
               aria-label="Create task"
               disabled={!ready}
               className="ml-auto flex h-8 items-center gap-1.5 rounded-[10px] px-2.5 text-[12.5px] font-medium transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.96]"
-              style={{ background: ready ? 'var(--ink)' : 'var(--line-strong)', color: ready ? 'var(--surface)' : 'var(--ink-2)' }}
+              style={{
+                background: ready ? 'var(--ink)' : 'var(--line-strong)',
+                color: ready ? 'var(--surface)' : 'var(--ink-2)',
+              }}
             >
               Create task <kbd>⌘↵</kbd>
             </button>
@@ -214,14 +296,31 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-2 text-[12px] text-ink-3">
-          <button type="button" id="retry-agent" onClick={onReprobe} title="Check sign-in again" className="rounded-[6px] transition-colors hover:text-ink-2">
-            <span id="agent-status"><AgentStatus agent={agent} /></span>
+          <button
+            type="button"
+            id="retry-agent"
+            onClick={onReprobe}
+            title="Check sign-in again"
+            className="rounded-[6px] transition-colors hover:text-ink-2"
+          >
+            <span id="agent-status">
+              <AgentStatus agent={agent} />
+            </span>
           </button>
-          {attachError && <span role="alert" className="text-red">{attachError}</span>}
+          {attachError && (
+            <span role="alert" className="text-red">
+              {attachError}
+            </span>
+          )}
         </div>
 
         <div className="mt-6 border-t border-line pt-3">
-          <button type="button" aria-expanded={showOptions} onClick={() => setShowOptions(open => !open)} className="-mx-1.5 flex items-center gap-1.5 rounded-control px-1.5 py-1 text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover-2">
+          <button
+            type="button"
+            aria-expanded={showOptions}
+            onClick={() => setShowOptions(open => !open)}
+            className="-mx-1.5 flex items-center gap-1.5 rounded-control px-1.5 py-1 text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover-2"
+          >
             <Chevron open={showOptions} />
             Options
           </button>
@@ -230,7 +329,13 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
               {optionFields.map(([key, label, placeholder]) => (
                 <label key={key} className="grid gap-1.5 text-[12.5px] font-medium text-ink-2">
                   {label}
-                  <input name={key} value={options[key]} onChange={event => setOptions(current => ({ ...current, [key]: event.target.value }))} placeholder={placeholder} className={`${key === 'title' ? '' : 'font-mono text-[12.5px]'} ${field}`} />
+                  <input
+                    name={key}
+                    value={options[key]}
+                    onChange={event => setOptions(current => ({ ...current, [key]: event.target.value }))}
+                    placeholder={placeholder}
+                    className={`${key === 'title' ? '' : 'font-mono text-[12.5px]'} ${field}`}
+                  />
                 </label>
               ))}
               <p className="text-[12px] text-ink-3">Setup can use the network. Checks run offline.</p>
@@ -239,7 +344,9 @@ export default function NewTask({ agent, busy, repository, repositories, preferr
         </div>
 
         <div className="mt-5">
-          <Button type="button" id="cancel-task" variant="quiet" size="xs" onClick={onCancel}>Cancel <kbd>Esc</kbd></Button>
+          <Button type="button" id="cancel-task" variant="quiet" size="xs" onClick={onCancel}>
+            Cancel <kbd>Esc</kbd>
+          </Button>
         </div>
       </form>
     </div>

@@ -2,7 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["**/*.ts", "**/*.tsx", "**/*.json", "!**/dist", "!**/.factory", "!bun.lock"]
+    "includes": ["**/*.ts", "**/*.tsx", "**/*.json", "!**/dist", "!**/.factory", "!bun.lock", "!tools/oxlint/anti-slop"]
   },
   "formatter": {
     "indentStyle": "space",
@@ -28,7 +28,7 @@
         "useExhaustiveDependencies": { "level": "error", "options": { "reportUnnecessaryDependencies": false } }
       },
       "style": { "noNonNullAssertion": "warn" },
-      "suspicious": { "noExplicitAny": "warn" }
+      "suspicious": { "noExplicitAny": "error" }
     }
   },
   "overrides": [

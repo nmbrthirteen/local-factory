@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useState } from 'react';
 import { Button } from '@/components/atoms/Button';
 import Modal from '@/components/primitives/Modal';
 
@@ -19,7 +19,10 @@ export const useConfirm = () => useContext(ConfirmContext);
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null);
 
-  const confirm = useCallback((options: ConfirmOptions) => new Promise<boolean>(resolve => setPending({ ...options, resolve })), []);
+  const confirm = useCallback(
+    (options: ConfirmOptions) => new Promise<boolean>(resolve => setPending({ ...options, resolve })),
+    [],
+  );
 
   const answer = (approved: boolean) => {
     pending?.resolve(approved);
@@ -48,8 +51,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               )}
             </div>
             <div className="primitive-card-footer flex justify-end gap-1.5 border-t border-line">
-              <Button type="button" variant="ghost" size="sm" onClick={() => answer(false)}>Cancel</Button>
-              <Button type="submit" variant={pending.tone === 'danger' ? 'danger' : 'primary'} size="sm" autoFocus>{pending.confirmLabel}</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => answer(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant={pending.tone === 'danger' ? 'danger' : 'primary'} size="sm" autoFocus>
+                {pending.confirmLabel}
+              </Button>
             </div>
           </form>
         )}

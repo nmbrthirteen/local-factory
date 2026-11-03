@@ -9,11 +9,19 @@ type MenuOption<T extends string = string> = { value: T; name: string; descripti
 
 export const popoverClass = 'absolute top-full z-30 mt-2 rounded-[10px] bg-surface p-1 shadow-raised';
 export const menuHighlight = 'inset-x-0 rounded-[6px] bg-hover';
-export const menuItem = 'relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] font-medium text-ink disabled:pointer-events-none disabled:opacity-50';
 
-export const MenuLabel = ({ children }: { children: ReactNode }) => <p className="px-2 pt-1.5 pb-1 text-[11.5px] font-medium text-ink-3">{children}</p>;
+export const menuItem =
+  'relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] font-medium text-ink disabled:pointer-events-none disabled:opacity-50';
+
+export const MenuLabel = ({ children }: { children: ReactNode }) => (
+  <p className="px-2 pt-1.5 pb-1 text-[11.5px] font-medium text-ink-3">{children}</p>
+);
+
 export const MenuDivider = () => <div className="my-1 h-px bg-line" />;
-export const MenuCheck = ({ on }: { on: boolean }) => <Icon name="check" size={13} strokeWidth={2.5} className={cn('shrink-0 text-ink', !on && 'invisible')} />;
+
+export const MenuCheck = ({ on }: { on: boolean }) => (
+  <Icon name="check" size={13} strokeWidth={2.5} className={cn('shrink-0 text-ink', !on && 'invisible')} />
+);
 
 type MenuProps<T extends string> = {
   label: string;
@@ -24,7 +32,14 @@ type MenuProps<T extends string> = {
   align?: 'left' | 'right';
 };
 
-export default function Menu<T extends string>({ label, value, options, onChange, disabled = false, align = 'left' }: MenuProps<T>) {
+export default function Menu<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+  align = 'left',
+}: MenuProps<T>) {
   const { open, setOpen, ref } = usePopover();
   const current = options.find(option => option.value === value);
 
@@ -44,7 +59,12 @@ export default function Menu<T extends string>({ label, value, options, onChange
         <Icon name="chevronDown" size={11} strokeWidth={2.4} className="text-ink-3" />
       </button>
       {open && (
-        <div role="listbox" aria-label={label} className={`${popoverClass} ${align === 'right' ? 'right-0' : 'left-0'} w-64`} style={popIn(180, `top ${align}`)}>
+        <div
+          role="listbox"
+          aria-label={label}
+          className={`${popoverClass} ${align === 'right' ? 'right-0' : 'left-0'} w-64`}
+          style={popIn(180, `top ${align}`)}
+        >
           <GlideMenu className="flex flex-col" highlightClassName={menuHighlight}>
             {options.map(option => (
               <button
@@ -61,7 +81,9 @@ export default function Menu<T extends string>({ label, value, options, onChange
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] font-medium text-ink">{option.name}</span>
-                  {option.description && <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-3">{option.description}</span>}
+                  {option.description && (
+                    <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-3">{option.description}</span>
+                  )}
                 </span>
                 {option.tag && <span className="shrink-0 text-[11px] text-ink-3">{option.tag}</span>}
                 <MenuCheck on={option.value === value} />

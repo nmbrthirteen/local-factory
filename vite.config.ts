@@ -14,7 +14,11 @@ export default defineConfig({
   server: {
     proxy: {
       // The API only accepts requests whose Host and Origin match its own address.
-      '/api': { target: api, changeOrigin: true, configure: proxy => proxy.on('proxyReq', request => request.setHeader('origin', api)) },
+      '/api': {
+        target: api,
+        changeOrigin: true,
+        configure: proxy => proxy.on('proxyReq', request => request.setHeader('origin', api)),
+      },
     },
   },
 });

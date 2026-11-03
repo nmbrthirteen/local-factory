@@ -1,5 +1,5 @@
-import type { ButtonHTMLAttributes } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
+import type { ButtonHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
 const filledShadow = 'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]';
@@ -25,6 +25,11 @@ export const buttonVariants = cva(
   },
 );
 
-export function Button({ variant, size, className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>) {
+export function Button({
+  variant,
+  size,
+  className,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>) {
   return <button className={cn(buttonVariants({ variant, size }), className)} {...props} />;
 }

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/atoms/Icon';
 import Modal from '@/components/primitives/Modal';
-import { searchPalette, type PaletteItem } from '@/lib/palette';
+import { type PaletteItem, searchPalette } from '@/lib/palette';
 import { MenuLabel } from './Menu';
 
 type CommandPaletteProps = { open: boolean; items: PaletteItem[]; onClose: () => void };
@@ -21,8 +21,10 @@ export default function CommandPalette({ open, items, onClose }: CommandPaletteP
     if (open) {
       setQuery('');
       setActive(0);
+
       return;
     }
+
     const item = chosen.current;
     chosen.current = null;
     item?.run();
@@ -58,7 +60,9 @@ export default function CommandPalette({ open, items, onClose }: CommandPaletteP
           onKeyDown={event => {
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
-              if (results.length) setActive(index => (index + (event.key === 'ArrowDown' ? 1 : results.length - 1)) % results.length);
+
+              if (results.length)
+                setActive(index => (index + (event.key === 'ArrowDown' ? 1 : results.length - 1)) % results.length);
             } else if (event.key === 'Enter') {
               event.preventDefault();
               run(current);
@@ -69,7 +73,12 @@ export default function CommandPalette({ open, items, onClose }: CommandPaletteP
         />
         <kbd>Esc</kbd>
       </div>
-      <div id="palette-results" role="listbox" aria-label="Results" className="scroll-thin max-h-[min(420px,60vh)] overflow-y-auto p-1.5">
+      <div
+        id="palette-results"
+        role="listbox"
+        aria-label="Results"
+        className="scroll-thin max-h-[min(420px,60vh)] overflow-y-auto p-1.5"
+      >
         {!results.length && <p className="px-3 py-6 text-center text-[13px] text-ink-3">Nothing matches "{query}"</p>}
         {results.map((item, index) => (
           <Fragment key={item.id}>
@@ -85,7 +94,9 @@ export default function CommandPalette({ open, items, onClose }: CommandPaletteP
               className={`flex h-9 w-full items-center gap-3 rounded-[8px] px-2.5 text-left text-[13px] transition-colors duration-75 ${item === current ? 'bg-hover-2 text-ink' : 'text-ink-2'}`}
             >
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {item.detail && <span className="max-w-[45%] shrink-0 truncate text-[12px] text-ink-3">{item.detail}</span>}
+              {item.detail && (
+                <span className="max-w-[45%] shrink-0 truncate text-[12px] text-ink-3">{item.detail}</span>
+              )}
             </button>
           </Fragment>
         ))}

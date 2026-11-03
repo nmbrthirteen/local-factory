@@ -4,9 +4,17 @@ export function agentBrowser(session: string) {
   async function browser(...args: string[]) {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { stdout: 'pipe', stderr: 'pipe' });
     const timer = setTimeout(() => child.kill(), commandTimeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+
     clearTimeout(timer);
+
     if (exitCode !== 0) throw new Error(`agent-browser ${args.join(' ')} failed: ${stderr.trim() || stdout.trim()}`);
+
     return stdout.trim();
   }
 

@@ -25,6 +25,7 @@ const server = Bun.serve({
   idleTimeout: 30,
   fetch(request, server) {
     const { pathname } = new URL(request.url);
+
     return pathname.startsWith('/api/') ? api(request, server) : serveAsset(dist, pathname);
   },
 });
@@ -41,5 +42,7 @@ async function shutdown() {
 }
 
 process.on('SIGTERM', shutdown);
+
 process.on('SIGINT', shutdown);
+
 console.log(`Local Factory: http://localhost:${server.port}`);

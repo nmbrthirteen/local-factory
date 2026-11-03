@@ -1,6 +1,7 @@
-import { access, mkdir, realpath } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { Commit, Recipe, Repository, Worktree } from '../shared/types';
+import { thrownSchema } from './failure';
 import { run, safeEnv } from './process';
 
 const recipes: Recipe[] = [
@@ -10,28 +11,75 @@ const recipes: Recipe[] = [
   { lockfile: 'bun.lock', setup: ['bun', 'install', '--frozen-lockfile'], check: ['bun', 'run', 'test'] },
 ];
 
-export const pathExists = (path: string) => access(path).then(() => true, () => false);
+export type Checkout = { path: string; gitDir: string };
 
-export async function git(cwd: string, args: string[]) {
-  const output = await run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { cwd, env: { ...safeEnv(), GIT_TERMINAL_PROMPT: '0' } });
+type GitOptions = { gitDir?: string; hooks?: boolean };
+
+export const pathExists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
+// System and global attribute files stay out of factory calls, so only the repository's own attributes pick filter and diff drivers.
+export async function git(cwd: string, args: string[], { gitDir, hooks = false }: GitOptions = {}) {
+  const config = [
+    ...(hooks ? [] : ['-c', 'core.hooksPath=/dev/null']),
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.attributesFile=/dev/null',
+  ];
+
+  const pinned: Record<string, string> = gitDir ? { GIT_DIR: gitDir, GIT_WORK_TREE: cwd } : {};
+
+  const output = await run(['git', ...config, ...args], {
+    cwd,
+    env: { ...safeEnv(), GIT_TERMINAL_PROMPT: '0', GIT_ATTR_NOSYSTEM: '1', ...pinned },
+  });
+
   return output.trim();
+}
+
+const inCheckout = ({ path, gitDir }: Checkout, args: string[]) => git(path, args, { gitDir });
+
+// The agent can rewrite the worktree's .git file, so the gitdir comes from the record Git keeps in the main repository instead.
+export async function checkout(repoPath: string, worktree: Worktree): Promise<Checkout> {
+  const path = await realpath(worktree.path);
+  const admin = join(await git(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir']), 'worktrees');
+
+  for (const name of await readdir(admin).catch((): string[] => [])) {
+    const recorded = (await readFile(join(admin, name, 'gitdir'), 'utf8').catch(() => '')).trim();
+
+    if (recorded && (await realpath(dirname(recorded)).catch(() => '')) === path)
+      return { path, gitDir: join(admin, name) };
+  }
+
+  throw new Error('Git has no record of this worktree in the repository. Remove the worktree and create a new task.');
 }
 
 export const optionalGit = (cwd: string, args: string[]) => git(cwd, args).catch(() => '');
 export const currentBranch = (path: string) => optionalGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
 export const hasOrigin = async (path: string) => Boolean(await optionalGit(path, ['remote', 'get-url', 'origin']));
-export const baseTree = (path: string, base: string) => git(path, ['rev-parse', `${base}^{tree}`]);
-const stageAll = (path: string) => git(path, ['add', '--all']);
+export const baseTree = (tree: Checkout, base: string) => inCheckout(tree, ['rev-parse', `${base}^{tree}`]);
+const stageAll = (tree: Checkout) => inCheckout(tree, ['add', '--all']);
 
-async function requireIdentity(path: string, action: string) {
-  if (!(await optionalGit(path, ['config', 'user.email']))) throw new Error(`Git has no user.email for this repository. Set one with git config --global user.email, then ${action} again.`);
+async function requireIdentity(path: string, action: string, gitDir?: string) {
+  if (!(await git(path, ['config', 'user.email'], { gitDir }).catch(() => '')))
+    throw new Error(
+      `Git has no user.email for this repository. Set one with git config --global user.email, then ${action} again.`,
+    );
 }
 
 async function requireCleanBranch(path: string, action: string) {
   const branch = await currentBranch(path);
+
   if (!branch) throw new Error(`The repository is not on a branch. Check out a branch, then ${action} again.`);
-  if (await git(path, ['status', '--porcelain', '--untracked-files=no'])) throw new Error(`The repository has uncommitted changes on ${branch}. Commit or stash them, then ${action} again.`);
+
+  if (await git(path, ['status', '--porcelain', '--untracked-files=no']))
+    throw new Error(`The repository has uncommitted changes on ${branch}. Commit or stash them, then ${action} again.`);
   await requireIdentity(path, action);
+
   return branch;
 }
 
@@ -39,14 +87,24 @@ export async function detectRecipe(root: string) {
   for (const recipe of recipes) {
     if (await pathExists(join(root, recipe.lockfile))) return recipe;
   }
+
   return null;
 }
 
-export async function inspectRepo(path: unknown): Promise<Repository> {
-  if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('Choose an absolute repository path');
+export async function inspectRepo(path: string): Promise<Repository> {
+  if (!path.startsWith('/')) throw new Error('Choose an absolute repository path');
   const root = await realpath(path);
-  if ((await realpath(await git(root, ['rev-parse', '--show-toplevel']))) !== root) throw new Error('Choose the repository root, not a subfolder');
-  const [base, status, remote, recipe] = await Promise.all([git(root, ['rev-parse', '--verify', 'HEAD']), git(root, ['status', '--porcelain']), hasOrigin(root), detectRecipe(root)]);
+
+  if ((await realpath(await git(root, ['rev-parse', '--show-toplevel']))) !== root)
+    throw new Error('Choose the repository root, not a subfolder');
+
+  const [base, status, remote, recipe] = await Promise.all([
+    git(root, ['rev-parse', '--verify', 'HEAD']),
+    git(root, ['status', '--porcelain']),
+    hasOrigin(root),
+    detectRecipe(root),
+  ]);
+
   return { path: root, base, dirty: Boolean(status), remote, recipe };
 }
 
@@ -55,7 +113,11 @@ const repoQueues = new Map<string, Promise<unknown>>();
 // Parallel runs share one repository, and Git writes its worktree list and refs without locking them against each other.
 function onRepo<T>(repoPath: string, work: () => Promise<T>): Promise<T> {
   const next = (repoQueues.get(repoPath) ?? Promise.resolve()).then(work, work);
-  repoQueues.set(repoPath, next.catch(() => undefined));
+  repoQueues.set(
+    repoPath,
+    next.catch(() => undefined),
+  );
+
   return next;
 }
 
@@ -64,65 +126,89 @@ export async function createWorktree(repo: Repository, directory: string, id: st
   await mkdir(parent, { recursive: true });
   const worktree = { path: join(parent, id), branch: `factory/${id}` };
   await onRepo(repo.path, () => git(repo.path, ['worktree', 'add', '-b', worktree.branch, worktree.path, repo.base]));
+
   return worktree;
 }
 
-export async function candidateTree(path: string) {
-  await stageAll(path);
-  return git(path, ['write-tree']);
+export async function candidateTree(tree: Checkout) {
+  await stageAll(tree);
+
+  return inCheckout(tree, ['write-tree']);
 }
 
-export async function commitWorktree(path: string, message: string) {
-  await requireIdentity(path, 'commit');
-  await stageAll(path);
-  await git(path, ['commit', '-m', message]);
-  return git(path, ['rev-parse', 'HEAD']);
+export async function commitWorktree(tree: Checkout, message: string) {
+  await requireIdentity(tree.path, 'commit', tree.gitDir);
+  await stageAll(tree);
+  await inCheckout(tree, ['commit', '-m', message]);
+
+  return inCheckout(tree, ['rev-parse', 'HEAD']);
 }
 
 export async function mergeBranch(repoPath: string, branch: string, message: string): Promise<Commit> {
   const target = await requireCleanBranch(repoPath, 'merge');
+
   try {
-    await git(repoPath, ['merge', '--no-ff', '-m', message, branch]);
+    // This lands on the owner's own branch, so their hooks run as they would for a merge by hand.
+    await git(repoPath, ['merge', '--no-ff', '-m', message, branch], { hooks: true });
   } catch (error) {
     await optionalGit(repoPath, ['merge', '--abort']);
-    throw new Error(`Could not merge into ${target}, so nothing changed: ${(error as Error).message}`);
+    throw new Error(`Could not merge into ${target}, so nothing changed: ${thrownSchema.parse(error).message}`);
   }
+
   return { branch: target, sha: await git(repoPath, ['rev-parse', 'HEAD']) };
 }
 
 export async function revertMerge(repoPath: string, merge: Commit, [, ...args]: string[]): Promise<Commit> {
   const branch = await requireCleanBranch(repoPath, 'revert');
-  if (branch !== merge.branch) throw new Error(`The merge landed on ${merge.branch}, but the repository is on ${branch}. Check out ${merge.branch}, then revert again.`);
-  const onBranch = await git(repoPath, ['merge-base', '--is-ancestor', merge.sha, 'HEAD']).then(() => true, () => false);
+
+  if (branch !== merge.branch)
+    throw new Error(
+      `The merge landed on ${merge.branch}, but the repository is on ${branch}. Check out ${merge.branch}, then revert again.`,
+    );
+
+  const onBranch = await git(repoPath, ['merge-base', '--is-ancestor', merge.sha, 'HEAD']).then(
+    () => true,
+    () => false,
+  );
+
   if (!onBranch) throw new Error(`The merge commit is no longer on ${branch}`);
+
   try {
     await git(repoPath, args);
   } catch (error) {
     await optionalGit(repoPath, ['revert', '--abort']);
-    throw new Error(`Could not revert on ${branch}, so nothing changed: ${(error as Error).message}`);
+    throw new Error(`Could not revert on ${branch}, so nothing changed: ${thrownSchema.parse(error).message}`);
   }
+
   return { branch, sha: await git(repoPath, ['rev-parse', 'HEAD']) };
 }
 
-export async function restoreTree(path: string, tree: string) {
-  await stageAll(path);
-  await git(path, ['read-tree', '-u', '--reset', tree]);
+export async function restoreTree(checkout: Checkout, tree: string) {
+  await stageAll(checkout);
+  await inCheckout(checkout, ['read-tree', '-u', '--reset', tree]);
 }
 
-export async function undoLastCommit(path: string, sha: string) {
-  if ((await git(path, ['rev-parse', 'HEAD'])) !== sha) throw new Error('The task branch moved after the commit, so it cannot be undone here');
-  await git(path, ['reset', '--soft', 'HEAD~1']);
+export async function undoLastCommit(tree: Checkout, sha: string) {
+  if ((await inCheckout(tree, ['rev-parse', 'HEAD'])) !== sha)
+    throw new Error('The task branch moved after the commit, so it cannot be undone here');
+  await inCheckout(tree, ['reset', '--soft', 'HEAD~1']);
 }
 
 export function deleteWorktree(repoPath: string, worktree: Worktree, keepBranch: boolean) {
   return onRepo(repoPath, async () => {
     await git(repoPath, ['worktree', 'remove', '--force', worktree.path]);
+
     if (!keepBranch) await git(repoPath, ['branch', '-D', worktree.branch]);
   });
 }
 
-export async function exportPatch(path: string, base: string, file: string) {
+export async function exportPatch(tree: Checkout, base: string, file: string) {
   await mkdir(dirname(file), { recursive: true });
-  await git(path, ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--binary', `--output=${file}`, base]);
-  return { path: file, bytes: Bun.file(file).size, files: await git(path, ['diff', '--cached', '--stat', base]) };
+  await inCheckout(tree, ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--binary', `--output=${file}`, base]);
+
+  return {
+    path: file,
+    bytes: Bun.file(file).size,
+    files: await inCheckout(tree, ['diff', '--cached', '--stat', base]),
+  };
 }

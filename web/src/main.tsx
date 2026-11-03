@@ -7,7 +7,9 @@ import { ConfirmProvider } from './components/app/ConfirmProvider';
 
 const scheme = matchMedia('(prefers-color-scheme: dark)');
 const applyScheme = () => document.documentElement.classList.toggle('dark', scheme.matches);
+
 applyScheme();
+
 scheme.addEventListener('change', applyScheme);
 
 createRoot(document.getElementById('root')!).render(

@@ -14,6 +14,7 @@ test('agent text and check output stream as live progress, and the check still r
     appended.push([key, kind, delta]);
     append(taskId, key, kind, delta);
   };
+
   const task = f.task('Write output LIVE_PROGRESS', loudCheck);
   const result = await f.run(task.id);
 

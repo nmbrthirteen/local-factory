@@ -1,12 +1,13 @@
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isActive } from '../shared/domain';
-import { resolvePreview, startApp, type App } from './preview';
+import { type App, resolvePreview, startApp } from './preview';
 import type { Store } from './store';
 
 const now = () => new Date().toISOString();
 
 type Options = { root: string; servicePort?: number };
+
 type Current = { id: string; app: App; stopping: boolean };
 
 // One app runs for review at a time, because many dev servers ask for the same fixed port.
@@ -22,6 +23,7 @@ export class LiveApps {
     this.isRunning = isRunning;
     this.root = root;
     this.blockedPorts = servicePort ? [servicePort] : [];
+
     for (const task of store.list()) {
       if (task.liveApp) store.update(task.id, { liveApp: null });
     }
@@ -29,33 +31,45 @@ export class LiveApps {
 
   async start(id: string) {
     const task = this.store.require(id);
+
     if (this.isRunning(id) || isActive(task.status)) throw new Error('Wait for the run to finish');
+
     if (!task.worktree || task.worktreeRemoved) throw new Error('This task has no worktree');
+
     if (this.current?.id === id) return task;
     const { command } = await resolvePreview(task.worktree.path, '', task.preview);
+
     if (!command.length) throw new Error('No start command. Add a dev, start, or preview script.');
     await this.stopCurrent();
     const scratch = join(this.root, '.factory/sandbox', `live-${id}`);
+
     const app = await startApp(command, task.worktree.path, scratch, this.blockedPorts).catch((error: Error) => {
       throw new Error(`App did not start: ${error.message}`);
     });
+
     const current: Current = { id, app, stopping: false };
     this.current = current;
     void app.exited.then(code => {
       if (this.current === current) this.current = null;
+
       if (this.store.get(id)) {
         this.store.update(id, { liveApp: null });
-        this.store.event(id, 'app_stopped', current.stopping ? 'App stopped' : `App exited: ${code}`, { output: app.log() });
+        this.store.event(id, 'app_stopped', current.stopping ? 'App stopped' : `App exited: ${code}`, {
+          output: app.log(),
+        });
       }
+
       return rm(scratch, { recursive: true, force: true }).catch(() => undefined);
     });
-    this.store.event(id, 'app_started', 'App running', { url: app.url, command });
+    this.store.event(id, 'app_started', 'App running', { url: app.url, command: command.join(' ') });
+
     return this.store.update(id, { liveApp: { url: app.url, command, startedAt: now() } });
   }
 
   async stop(id: string) {
     if (this.current?.id !== id) throw new Error('The app is not running');
     await this.stopCurrent();
+
     return this.store.require(id);
   }
 
@@ -69,6 +83,7 @@ export class LiveApps {
 
   private async stopCurrent() {
     const current = this.current;
+
     if (!current) return;
     current.stopping = true;
     this.current = null;

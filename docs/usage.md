@@ -21,7 +21,7 @@ Open http://localhost:4310. Set `PORT` to change it.
 | --- | --- | --- |
 | Ask me | Questions and requests wait for you | 15 min |
 | Automatic, sandboxed | Agent decides, requests outside the sandbox are declined | 45 min |
-| Automatic, full access | Agent decides, requests are approved | 45 min |
+| Automatic, full access | Agent decides, requests are approved, including ones that leave the sandbox | 45 min |
 
 Automatic tasks retry a failed check up to 3 attempts.
 
@@ -46,7 +46,8 @@ The bell next to the connection status picks sound, banner, both, or off. The ta
 ## Finish
 
 - **Open pull request:** needs an `origin` remote and `gh auth login`
-- **Merge:** commits and merges into your current branch
+- **Merge:** commits and merges into your current branch, with your Git hooks
+- **Merge unchecked:** when no check ran, Merge and Open pull request ask you to confirm first
 - **Commit to branch only:** in the ⋯ menu
 - **Another attempt:** write what to change and run again
 - **Roll back, Undo commit, Revert:** undo at any stage

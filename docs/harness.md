@@ -17,7 +17,7 @@ flowchart TD
 ## A run
 
 1. A worktree is created at `.factory/worktrees/<repo>/<task>` from the base commit.
-2. Setup runs with network on for up to 10 minutes. If it changes tracked files, the run stops.
+2. Setup runs with network on for up to 20 minutes. If it changes tracked files, the run stops.
 3. The agent works with network off.
 4. The check runs offline for up to 2 minutes, recorded with its exit code and Git tree. A check that changes the tree fails.
 5. The patch is saved, screenshots are taken, and the app starts for review.
@@ -26,13 +26,15 @@ Runs are parallel, one worktree each. A task can only run once at a time, and on
 
 ## Checks
 
-The first of: the task's check, the agent's `CHECK: <command>` line, `npm test`, or `node --test`. With none, the task is Unchecked.
+The first of: the task's check, the agent's `CHECK: <command>` line, the `test` script run with the lockfile's package manager (`npm test`, `pnpm test`, `yarn test`, or `bun run test`), or `node --test`. With none, the task is Unchecked, and Merge or Open pull request needs your confirmation.
+
+The factory ignores an agent check that cannot fail: `true`, `echo`, inline code that calls nothing, or a shell `-c` script that masks the exit code with `||`, `;`, or a pipe.
 
 ## Agents
 
 - **Codex:** `codex-cli 0.154.0` app-server, `workspace-write` sandbox, network off, hooks, plugins, and MCP servers off.
 - **Claude:** Agent SDK 0.3.268, no setting sources, OS sandbox with an empty network allowlist, only the factory MCP server.
-- **OpenCode:** 1.18.30 headless server with a random password, project config off, shell under `sandbox-exec`.
+- **OpenCode:** 1.18.30 headless server with a random password and project config off. The server runs under `sandbox-exec` with network on for the provider and writes limited to the worktree, the cache, and OpenCode's folders. Its shell runs under a second, offline `sandbox-exec`.
 
 Each adapter reads back the effective policy and fails the run on a mismatch.
 
@@ -42,17 +44,19 @@ Agents get `agents/implementer.md`, then global and repository `CLAUDE.md` and `
 
 ## Preview
 
-The app starts from the agent's `PREVIEW:` line or a `preview`, `dev`, `start`, `ui`, or `serve` script, under `sandbox-exec` with loopback only. `agent-browser` takes desktop and phone screenshots. Codex and Claude also get `preview_*` tools. `backend/live.ts` keeps one app running for review until merge, settle, or rollback.
+The app starts from the agent's `PREVIEW:` line or a `preview`, `dev`, `start`, `ui`, or `serve` script, under `sandbox-exec`. It can listen on loopback and connect only to the `PORT` it is given. A printed address counts only when the app's own process listens there. `agent-browser` takes desktop and phone screenshots, and its proxy settings let it reach the app's port alone. Preview tools refuse to act once the page leaves the app's origin. Codex and Claude also get `preview_*` tools. `backend/live.ts` keeps one app running for review until merge, settle, or rollback.
 
 ## Delivery
 
-- **Merge:** `git merge --no-ff` into your current branch, with clean tracked files.
+- **Merge:** `git merge --no-ff` into your current branch, with clean tracked files. Your repository's Git hooks run for this merge. Every other factory Git call runs with hooks off.
 - **Pull request:** pushes the branch and runs `gh pr create`.
 - **Roll back, Undo commit, Remove worktree:** change only the task's worktree and branch.
 
 Revert and `gh pr merge` or `close` come from `shared/commands.ts`. The API accepts a command ID and rebuilds the arguments itself.
 
-Suggested commands run through `backend/terminal.ts` with `/bin/zsh -lc` in the worktree, outside the sandbox, one per task.
+Suggested commands run through `backend/terminal.ts` with `/bin/zsh -lc` in the worktree, outside the sandbox, one per task. Once the worktree is gone they refuse to run.
+
+Factory Git calls in a worktree set `GIT_DIR` to the gitdir Git recorded in the main repository, so an agent that rewrites the worktree's `.git` file cannot point them elsewhere. They also skip system and global attribute files. The factory's sandbox profiles keep each writable root's `.git` read-only.
 
 ## API and recovery
 

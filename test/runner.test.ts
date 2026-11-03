@@ -3,12 +3,12 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { git, inspectRepo } from '../backend/git';
-import type { Run } from '../backend/runner';
+import type { PendingRequest, RunClock } from '../backend/runner';
 import { Store } from '../backend/store';
 import { Uploads } from '../backend/uploads';
 import { fakeClaude } from './fake-claude';
 import { fakeOpencode } from './fake-opencode';
-import { createFixture, exitCheck, fileCheck, outputCheck } from './fixture';
+import { createFixture, exitCheck, fileCheck } from './fixture';
 import { cleanupAfterEach, until } from './support';
 
 const onCleanup = cleanupAfterEach();
@@ -60,8 +60,23 @@ test('two tasks run side by side in their own worktrees', async () => {
 test('a task carries its attachments into the prompt and the turn input', async () => {
   const f = await fixture();
   const uploads = new Uploads(f.root);
-  const png = await uploads.save(new Request('http://local/api/uploads', { method: 'POST', headers: { 'Content-Type': 'image/png', 'X-Attachment-Name': 'shot.png' }, body: new Blob(['\x89PNG\r\n\x1a\n']) }));
-  const csv = await uploads.save(new Request('http://local/api/uploads', { method: 'POST', headers: { 'Content-Type': 'text/csv', 'X-Attachment-Name': 'rows.csv' }, body: new Blob(['name,count\nfirst,2\n']) }));
+
+  const png = await uploads.save(
+    new Request('http://local/api/uploads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png', 'X-Attachment-Name': 'shot.png' },
+      body: new Blob(['\x89PNG\r\n\x1a\n']),
+    }),
+  );
+
+  const csv = await uploads.save(
+    new Request('http://local/api/uploads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv', 'X-Attachment-Name': 'rows.csv' },
+      body: new Blob(['name,count\nfirst,2\n']),
+    }),
+  );
+
   const task = f.create({ criteria: 'RECORD_PROMPT with attachments', attachments: [png, csv] });
   const result = await f.run(task.id);
   expect(result.status).toBe('handoff');
@@ -76,7 +91,7 @@ test('cancel and duplicate start preserve a single attempt', async () => {
   const task = f.task('WAIT_FOREVER');
   f.runner.start(task.id);
   expect(() => f.runner.start(task.id)).toThrow(/already running/);
-  await until(() => f.store.require(task.id).turnId);
+  await until(() => f.store.require(task.id).turnId !== undefined);
   const done = f.runner.runs.get(task.id)?.done;
   f.runner.cancel(task.id);
   await done;
@@ -106,7 +121,13 @@ test('diff larger than the process output buffer is exported as a patch', async 
 
 test('setup runs before the agent with caches in a writable root', async () => {
   const f = await fixture();
-  const task = f.task(undefined, undefined, [process.execPath, '-e', 'process.stdout.write(process.env.npm_config_cache)']);
+
+  const task = f.task(undefined, undefined, [
+    process.execPath,
+    '-e',
+    'process.stdout.write(process.env.npm_config_cache)',
+  ]);
+
   const result = await f.run(task.id);
   expect(result.status).toBe('handoff');
   expect(result.setupResult?.stdout).toBe(join(f.root, '.factory/cache/npm'));
@@ -118,10 +139,15 @@ test('setup runs before the agent with caches in a writable root', async () => {
 
 test('failed or file-changing setup stops before the agent starts', async () => {
   const f = await fixture();
+
   const cases: [string[], RegExp][] = [
     [exitCheck(3), /Setup failed/],
-    [[process.execPath, '-e', "require('node:fs').writeFileSync('README.md','changed')"], /Setup changed repository files/],
+    [
+      [process.execPath, '-e', "require('node:fs').writeFileSync('README.md','changed')"],
+      /Setup changed repository files/,
+    ],
   ];
+
   for (const [setup, error] of cases) {
     const result = await f.run(f.task(undefined, undefined, setup).id);
     expect(result.status).toBe('failed');
@@ -134,12 +160,18 @@ test('repository inspection suggests a recipe from its lockfile', async () => {
   const f = await fixture();
   expect((await inspectRepo(f.repoPath)).recipe).toBeNull();
   await writeFile(join(f.repoPath, 'package-lock.json'), '{}');
-  expect((await inspectRepo(f.repoPath)).recipe).toEqual({ lockfile: 'package-lock.json', setup: ['npm', 'ci'], check: ['npm', 'test'] });
+  expect((await inspectRepo(f.repoPath)).recipe).toEqual({
+    lockfile: 'package-lock.json',
+    setup: ['npm', 'ci'],
+    check: ['npm', 'test'],
+  });
 });
 
 test('claude run uses isolated options and ends in a checked handoff', async () => {
   process.env.FACTORY_TEST_SECRET = 'do-not-forward';
-  onCleanup(() => delete process.env.FACTORY_TEST_SECRET);
+  onCleanup(() => {
+    delete process.env.FACTORY_TEST_SECRET;
+  });
   const claude = fakeClaude();
   const f = await fixture({ claude: claude.query });
   const task = f.claudeTask();
@@ -148,11 +180,22 @@ test('claude run uses isolated options and ends in a checked handoff', async () 
   expect(result.checkResult?.exitCode).toBe(0);
   expect(result.usage?.costUsd).toBe(0.0123);
   expect(result.agentPolicy).toMatchObject({ permissionMode: 'acceptEdits' });
-  expect(claude.calls.options).toMatchObject({ settingSources: [], strictMcpConfig: true, sandbox: { allowUnsandboxedCommands: false, network: { allowedDomains: [] } } });
-  expect(claude.calls.options.env.FACTORY_TEST_SECRET).toBeUndefined();
+  expect(claude.calls.options).toMatchObject({
+    settingSources: [],
+    strictMcpConfig: true,
+    sandbox: { allowUnsandboxedCommands: false, network: { allowedDomains: [] } },
+  });
+  expect(claude.calls.options?.env?.FACTORY_TEST_SECRET).toBeUndefined();
   expect(claude.calls.prompt).toMatch(/What done looks like/);
-  expect(claude.calls.options.systemPrompt.append).toMatch(/^Implement the task\.\n\n## Owner instructions from ~\/\.claude\/CLAUDE\.md\n\nOwner fixture rules[\s\S]*## Repository instructions from AGENTS\.md\n\nRepository fixture rules[\s\S]*Do not push/);
-  expect(result.instructionFiles?.map(file => [file.scope, file.label, file.native])).toEqual([['global', '~/.claude/CLAUDE.md', false], ['repository', 'AGENTS.md', false]]);
+  expect(claude.calls.options?.systemPrompt).toMatchObject({
+    append: expect.stringMatching(
+      /^Implement the task\.\n\n## Owner instructions from ~\/\.claude\/CLAUDE\.md\n\nOwner fixture rules[\s\S]*## Repository instructions from AGENTS\.md\n\nRepository fixture rules[\s\S]*Do not push/,
+    ),
+  });
+  expect(result.instructionFiles?.map(file => [file.scope, file.label, file.native])).toEqual([
+    ['global', '~/.claude/CLAUDE.md', false],
+    ['repository', 'AGENTS.md', false],
+  ]);
   expect(f.store.events(task.id).some(event => event.text === 'Implemented with Claude')).toBe(true);
   expect(claude.calls.closed).toBeGreaterThan(0);
 });
@@ -163,9 +206,19 @@ test('codex gets the preview tools, and the factory answers their calls', async 
   const result = await f.run(task.id);
   expect(result.status).toBe('handoff');
   const tools = JSON.parse(await readFile(`${result.worktree!.path}.tools`, 'utf8'));
-  expect(tools.map((tool: { name: string }) => tool.name)).toEqual(['preview_open', 'preview_screenshot', 'preview_logs', 'preview_interact']);
-  expect(JSON.parse(await readFile(`${result.worktree!.path}.tool`, 'utf8'))).toEqual({ success: false, contentItems: [{ type: 'inputText', text: 'The app is not running. Call preview_open first.' }] });
-  expect(f.store.events(task.id).some(event => event.type === 'tool_result' && event.text === 'Tool returned an error')).toBe(true);
+  expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
+    'preview_open',
+    'preview_screenshot',
+    'preview_logs',
+    'preview_interact',
+  ]);
+  expect(JSON.parse(await readFile(`${result.worktree!.path}.tool`, 'utf8'))).toEqual({
+    success: false,
+    contentItems: [{ type: 'inputText', text: 'The app is not running. Call preview_open first.' }],
+  });
+  expect(
+    f.store.events(task.id).some(event => event.type === 'tool_result' && event.text === 'Tool returned an error'),
+  ).toBe(true);
 });
 
 test('claude gets the factory preview server, and its tools run without asking the owner', async () => {
@@ -174,7 +227,7 @@ test('claude gets the factory preview server, and its tools run without asking t
   const task = f.claudeTask();
   const result = await f.run(task.id);
   expect(result.status).toBe('handoff');
-  expect(claude.calls.options.mcpServers.factory).toMatchObject({ name: 'factory' });
+  expect(claude.calls.options?.mcpServers?.factory).toMatchObject({ name: 'factory' });
   expect(claude.calls.factoryDecision).toMatchObject({ behavior: 'allow' });
   expect(f.store.events(task.id).some(event => event.type === 'request')).toBe(false);
 });
@@ -192,8 +245,8 @@ test('claude approvals and questions go to the owner and reject replay', async (
   expect(() => f.runner.answer(task.id, 'tool-2', { answers: {} })).toThrow(/Answer each question/);
   f.runner.answer(task.id, 'tool-2', { answers: { 0: 'implemented' } });
   await f.runner.runs.get(task.id)?.done;
-  expect(claude.calls.decision.behavior).toBe('deny');
-  expect(claude.calls.answer.updatedInput.answers).toEqual({ 'Which output?': 'implemented' });
+  expect(claude.calls.decision?.behavior).toBe('deny');
+  expect(claude.calls.answer).toMatchObject({ updatedInput: { answers: { 'Which output?': 'implemented' } } });
   expect(f.store.require(task.id).status).toBe('handoff');
 });
 
@@ -212,7 +265,7 @@ test('cancel stops a claude session', async () => {
   const f = await fixture({ claude: claude.query });
   const task = f.claudeTask();
   f.runner.start(task.id);
-  await until(() => f.store.require(task.id).agentPolicy);
+  await until(() => f.store.require(task.id).agentPolicy !== undefined);
   const done = f.runner.runs.get(task.id)?.done;
   f.runner.cancel(task.id);
   await done;
@@ -223,7 +276,13 @@ test('cancel stops a claude session', async () => {
 
 test('another attempt reuses the worktree with the last check output and owner feedback', async () => {
   const f = await fixture();
-  const check = [process.execPath, '-e', "process.stdout.write('needs fixed.txt'); process.exit(require('node:fs').existsSync('fixed.txt') ? 0 : 3)"];
+
+  const check = [
+    process.execPath,
+    '-e',
+    "process.stdout.write('needs fixed.txt'); process.exit(require('node:fs').existsSync('fixed.txt') ? 0 : 3)",
+  ];
+
   const task = f.task('RECORD_PROMPT', check, [process.execPath, '-e', '0']);
   const first = await f.run(task.id);
   expect(first.status).toBe('failed');
@@ -244,10 +303,20 @@ test('the run limit counts working time and pauses while a request waits for the
   const f = await fixture();
   const canceled: string[] = [];
   f.runner.cancel = (_id, reason = '') => void canceled.push(reason);
-  const run = { id: 'clock', pending: new Map(), limitMs: 80, remainingMs: 80, deadline: 0, timer: null, canceled: false } as unknown as Run;
+
+  const run: RunClock = {
+    id: 'clock',
+    pending: new Map<string, PendingRequest>(),
+    limitMs: 80,
+    remainingMs: 80,
+    deadline: 0,
+    timer: null,
+    canceled: false,
+  };
+
   f.runner.syncClock(run);
   await Bun.sleep(30);
-  run.pending.set('request', {} as never);
+  run.pending.set('request', { key: 'request', kind: 'approval', params: {}, reply: () => {} });
   f.runner.syncClock(run);
   await Bun.sleep(150);
   expect(canceled).toEqual([]);
@@ -266,7 +335,7 @@ test('opencode run ends in a checked handoff with usage', async () => {
   expect(result.status).toBe('handoff');
   expect(result.checkResult?.exitCode).toBe(0);
   expect(result.usage?.costUsd).toBe(0.01);
-  expect(opencode.calls.options.cwd).toBe(result.worktree!.path);
+  expect(opencode.calls.options?.cwd).toBe(result.worktree!.path);
   expect(opencode.calls.prompt).toMatch(/What done looks like/);
   expect(f.store.events(task.id).some(event => event.text === 'Implemented with OpenCode')).toBe(true);
   expect(opencode.calls.closed).toBeGreaterThan(0);
@@ -296,7 +365,7 @@ test('opencode fails on an unavailable model and stops on cancel', async () => {
   expect(unavailable.error ?? '').toMatch(/Selected model is unavailable/);
   expect(missing.calls.closed).toBeGreaterThan(0);
   const waiting = fakeOpencode({ wait: true });
-  f.runner.opencode = waiting.open as unknown as typeof f.runner.opencode;
+  f.runner.opencode = waiting.open;
   const task = f.opencodeTask();
   f.runner.start(task.id);
   await until(() => f.store.require(task.id).status === 'running');
@@ -315,7 +384,9 @@ test('without a check command the factory runs the check the agent names', async
   expect(result.checkSource).toBe('agent');
   expect(result.resolvedCheck?.slice(0, 2)).toEqual(['node', '-e']);
   expect(result.checkResult?.exitCode).toBe(0);
-  expect(await readFile(`${result.worktree!.path}.prompts`, 'utf8')).toMatch(/end your final message with one line naming the single offline command/);
+  expect(await readFile(`${result.worktree!.path}.prompts`, 'utf8')).toMatch(
+    /end your final message with one line naming the single offline command/,
+  );
 });
 
 test('without a named check the factory uses tests it finds, or marks the task unchecked', async () => {
@@ -331,7 +402,16 @@ test('without a named check the factory uses tests it finds, or marks the task u
   await writeFile(join(f.repoPath, 'test/sample.test.js'), "require('node:test')('works', () => {});\n");
   await git(f.repoPath, ['add', '.']);
   await git(f.repoPath, ['commit', '-m', 'Add a test']);
-  const detected = f.store.create({ title: 'Detected', criteria: 'Write output', setup: [], check: [], repo: await inspectRepo(f.repoPath), model: 'test-model' });
+
+  const detected = f.store.create({
+    title: 'Detected',
+    criteria: 'Write output',
+    setup: [],
+    check: [],
+    repo: await inspectRepo(f.repoPath),
+    model: 'test-model',
+  });
+
   const result = await f.run(detected.id);
   expect(result.checkSource).toBe('detected');
   expect(result.resolvedCheck).toEqual(['node', '--test']);
@@ -341,7 +421,11 @@ test('without a named check the factory uses tests it finds, or marks the task u
 
 test('independent tasks decide permission requests without the owner', async () => {
   const f = await fixture();
-  for (const [autonomy, decision] of [['sandboxed', 'Declined'], ['full', 'Allowed']] as const) {
+
+  for (const [autonomy, decision] of [
+    ['sandboxed', 'Declined'],
+    ['full', 'Allowed'],
+  ] as const) {
     const task = f.create({ title: 'Independent', criteria: 'REQUEST_APPROVAL', autonomy });
     f.runner.start(task.id);
     const result = await f.settled(task.id);
@@ -357,13 +441,14 @@ test('permissions change on a waiting task, and switching to automatic answers w
   const task = f.create({ title: 'Ask first', criteria: 'REQUEST_APPROVAL', autonomy: 'ask' });
   f.runner.start(task.id);
   await until(() => f.store.require(task.id).status === 'awaiting_approval');
-  expect(() => f.runner.setAutonomy(task.id, 'reckless')).toThrow(/Choose how independently/);
   f.runner.setAutonomy(task.id, 'full');
   const result = await f.settled(task.id);
   expect(result.status).toBe('handoff');
   expect(result.autonomy).toBe('full');
   const events = f.store.events(task.id);
-  expect(events.some(event => event.type === 'autonomy' && event.text === 'Permissions: automatic, full access')).toBe(true);
+  expect(events.some(event => event.type === 'autonomy' && event.text === 'Permissions: automatic, full access')).toBe(
+    true,
+  );
   expect(events.some(event => event.type === 'request_answered' && event.text.startsWith('Allowed'))).toBe(true);
 });
 
@@ -388,7 +473,12 @@ test('independent tasks retry a failed check on their own, up to three attempts'
 test('agent checks are cached per agent, and signed-out results are not', async () => {
   const f = await fixture();
   let calls = 0;
-  f.runner.opencodeProbe = async () => ({ harness: 'opencode', version: '1.18.30', authenticated: ++calls > 1, models: [] });
+  f.runner.opencodeProbe = async () => ({
+    harness: 'opencode',
+    version: '1.18.30',
+    authenticated: ++calls > 1,
+    models: [],
+  });
   expect((await f.runner.probe('opencode')).authenticated).toBe(false);
   expect((await f.runner.probe('opencode')).authenticated).toBe(true);
   expect((await f.runner.probe('opencode')).authenticated).toBe(true);
@@ -397,7 +487,11 @@ test('agent checks are cached per agent, and signed-out results are not', async 
 
 test('check that changes the candidate invalidates the result', async () => {
   const f = await fixture();
-  const result = await f.run(f.task('Write output', [process.execPath, '-e', "require('node:fs').writeFileSync('output.txt','changed')"]).id);
+
+  const result = await f.run(
+    f.task('Write output', [process.execPath, '-e', "require('node:fs').writeFileSync('output.txt','changed')"]).id,
+  );
+
   expect(result.status).toBe('failed');
   expect(result.error ?? '').toMatch(/modified the candidate/);
 });

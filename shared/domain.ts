@@ -5,13 +5,21 @@ export const harnesses = ['codex', 'claude', 'opencode'] as const;
 export const autonomyLevels = ['ask', 'sandboxed', 'full'] as const;
 
 export type WorkingState = (typeof workingStates)[number];
+
 export type ActiveState = (typeof activeStates)[number];
+
 export type FinishedState = (typeof finishedStates)[number];
+
 export type TaskStatus = 'queued' | ActiveState | FinishedState;
+
 export type Harness = (typeof harnesses)[number];
+
 export type Autonomy = (typeof autonomyLevels)[number];
 
-const oneOf = <T extends string>(values: readonly T[]) => (value: unknown): value is T => values.includes(value as T);
+const oneOf =
+  <T extends string>(values: readonly T[]) =>
+  (value: unknown): value is T =>
+    values.some(known => known === value);
 
 export const isWorking = oneOf(workingStates);
 export const isActive = oneOf(activeStates);

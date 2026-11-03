@@ -23,17 +23,34 @@ test('global and repository instruction files reach every agent exactly once', a
 
   for (const harness of ['claude', 'opencode'] as const) {
     const { text, files } = await loadInstructions({ harness, worktree, home, env: {} });
-    for (const rule of ['Global Claude rules', 'Global agent rules', 'Repository Claude rules', 'Repository agent rules']) expect(occurrences(text, rule)).toBe(1);
+
+    for (const rule of [
+      'Global Claude rules',
+      'Global agent rules',
+      'Repository Claude rules',
+      'Repository agent rules',
+    ])
+      expect(occurrences(text, rule)).toBe(1);
     expect(text).toMatch(/## Owner instructions from ~\/\.claude\/CLAUDE\.md\n\nGlobal Claude rules/);
     expect(text).toMatch(/## Repository instructions from AGENTS\.md\n\nRepository agent rules/);
-    expect(files.map(file => [file.scope, file.label, file.native])).toEqual([['global', '~/.claude/CLAUDE.md', false], ['global', '~/.codex/AGENTS.md', false], ['repository', 'CLAUDE.md', false], ['repository', 'AGENTS.md', false]]);
+    expect(files.map(file => [file.scope, file.label, file.native])).toEqual([
+      ['global', '~/.claude/CLAUDE.md', false],
+      ['global', '~/.codex/AGENTS.md', false],
+      ['repository', 'CLAUDE.md', false],
+      ['repository', 'AGENTS.md', false],
+    ]);
   }
 
   const codex = await loadInstructions({ harness: 'codex', worktree, home, env: {} });
   expect(codex.text).toMatch(/Global Claude rules/);
   expect(codex.text).toMatch(/Repository Claude rules/);
   expect(codex.text).not.toMatch(/Global agent rules|Repository agent rules/);
-  expect(codex.files.map(file => [file.label, file.native])).toEqual([['~/.claude/CLAUDE.md', false], ['~/.codex/AGENTS.md', true], ['CLAUDE.md', false], ['AGENTS.md', true]]);
+  expect(codex.files.map(file => [file.label, file.native])).toEqual([
+    ['~/.claude/CLAUDE.md', false],
+    ['~/.codex/AGENTS.md', true],
+    ['CLAUDE.md', false],
+    ['AGENTS.md', true],
+  ]);
 
   await writeFile(join(worktree, 'CLAUDE.md'), 'Repository agent rules');
   const copied = await loadInstructions({ harness: 'codex', worktree, home, env: {} });
@@ -47,7 +64,10 @@ test('global and repository instruction files reach every agent exactly once', a
   const relocated = await loadInstructions({ harness: 'opencode', worktree, home, env: { CODEX_HOME: codexHome } });
   expect(relocated.files.some(file => file.label === join(codexHome, 'AGENTS.md'))).toBe(true);
   expect(relocated.text).toMatch(/Relocated agent rules/);
-  expect((await loadInstructions({ harness: 'claude', worktree: join(root, 'empty'), home: join(root, 'nobody'), env: {} })).text).toBe('');
+  expect(
+    (await loadInstructions({ harness: 'claude', worktree: join(root, 'empty'), home: join(root, 'nobody'), env: {} }))
+      .text,
+  ).toBe('');
 
   await writeFile(join(worktree, 'CLAUDE.md'), 'x'.repeat(70 * 1024));
   const large = await loadInstructions({ harness: 'claude', worktree, home, env: {} });
@@ -60,9 +80,13 @@ test('identical owner files are delivered once, and native Codex files suppress 
   onCleanup(() => rm(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   const worktree = join(root, 'worktree');
-  for (const directory of ['.claude', '.codex', '.config/opencode']) await mkdir(join(home, directory), { recursive: true });
+
+  for (const directory of ['.claude', '.codex', '.config/opencode'])
+    await mkdir(join(home, directory), { recursive: true });
   await mkdir(worktree);
-  for (const file of ['.claude/CLAUDE.md', '.codex/AGENTS.md', '.config/opencode/AGENTS.md']) await writeFile(join(home, file), 'Same owner rules');
+
+  for (const file of ['.claude/CLAUDE.md', '.codex/AGENTS.md', '.config/opencode/AGENTS.md'])
+    await writeFile(join(home, file), 'Same owner rules');
   const claude = await loadInstructions({ harness: 'claude', worktree, home, env: {} });
   expect(occurrences(claude.text, 'Same owner rules')).toBe(1);
   expect(claude.files.map(file => file.label)).toEqual(['~/.claude/CLAUDE.md']);

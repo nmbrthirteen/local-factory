@@ -11,13 +11,23 @@ import { Store } from '../backend/store';
 import type { NewTask } from '../shared/types';
 import { until } from './support';
 
-export const outputCheck = [process.execPath, '-e', "require('node:assert').equal(require('node:fs').readFileSync('output.txt','utf8'),'implemented\\n')"];
+export const outputCheck = [
+  process.execPath,
+  '-e',
+  "require('node:assert').equal(require('node:fs').readFileSync('output.txt','utf8'),'implemented\\n')",
+];
+
 export const exitCheck = (code: number) => [process.execPath, '-e', `process.exit(${code})`];
-export const fileCheck = (file: string, failCode = 3) => [process.execPath, '-e', `process.exit(require('node:fs').existsSync('${file}') ? 0 : ${failCode})`];
 
-type Agents = { claude?: unknown; opencode?: unknown };
+export const fileCheck = (file: string, failCode = 3) => [
+  process.execPath,
+  '-e',
+  `process.exit(require('node:fs').existsSync('${file}') ? 0 : ${failCode})`,
+];
 
-export async function createFixture(onCleanup: (cleanup: () => unknown) => void, agents: Agents = {}) {
+type Agents = { claude?: ClaudeQuery; opencode?: OpenOpencode };
+
+export async function createFixture(onCleanup: (cleanup: () => void | Promise<void>) => void, agents: Agents = {}) {
   const root = await mkdtemp(join(tmpdir(), 'factory-test-'));
   await mkdir(join(root, 'agents'));
   await writeFile(join(root, 'agents/implementer.md'), 'Implement the task.');
@@ -30,17 +40,27 @@ export async function createFixture(onCleanup: (cleanup: () => unknown) => void,
   await writeFile(join(repoPath, 'README.md'), 'fixture');
   await writeFile(join(repoPath, 'AGENTS.md'), 'Repository fixture rules');
   await git(repoPath, ['add', '.']);
-  await git(repoPath, ['-c', 'user.name=Factory test', '-c', 'user.email=factory@example.invalid', 'commit', '-m', 'fixture']);
+  await git(repoPath, [
+    '-c',
+    'user.name=Factory test',
+    '-c',
+    'user.email=factory@example.invalid',
+    'commit',
+    '-m',
+    'fixture',
+  ]);
 
   const db = join(root, 'state.sqlite');
   const store = new Store(db);
+
   const runner = new Runner(store, root, {
     home,
     version: async () => '0.154.0',
     adapter: () => new Codex({ command: process.execPath, args: [join(import.meta.dir, 'fake-codex.ts')], cwd: root }),
-    claudeQuery: agents.claude as ClaudeQuery | undefined,
-    opencode: agents.opencode as OpenOpencode | undefined,
+    claudeQuery: agents.claude,
+    opencode: agents.opencode,
   });
+
   const delivery = new Delivery(store, id => runner.runs.has(id));
   onCleanup(async () => {
     await runner.shutdown();
@@ -49,7 +69,17 @@ export async function createFixture(onCleanup: (cleanup: () => unknown) => void,
   });
 
   const repo = await inspectRepo(repoPath);
-  const create = (overrides: Partial<NewTask> = {}) => store.create({ title: 'Test task', criteria: 'Write output', setup: [], check: outputCheck, repo, model: 'test-model', ...overrides });
+
+  const create = (overrides: Partial<NewTask> = {}) =>
+    store.create({
+      title: 'Test task',
+      criteria: 'Write output',
+      setup: [],
+      check: outputCheck,
+      repo,
+      model: 'test-model',
+      ...overrides,
+    });
 
   return {
     root,
@@ -70,10 +100,15 @@ export async function createFixture(onCleanup: (cleanup: () => unknown) => void,
     async run(id: string, feedback?: string) {
       runner.start(id, feedback);
       await runner.runs.get(id)?.done;
+
       return store.require(id);
     },
     async settled(id: string) {
-      await until(() => !runner.runs.has(id) && ['handoff', 'failed', 'canceled'].includes(store.require(id).status), { attempts: 400, delayMs: 50 });
+      await until(() => !runner.runs.has(id) && ['handoff', 'failed', 'canceled'].includes(store.require(id).status), {
+        attempts: 400,
+        delayMs: 50,
+      });
+
       return store.require(id);
     },
   };

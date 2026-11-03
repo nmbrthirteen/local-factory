@@ -6,13 +6,17 @@ test('refreshes coalesce while a slow request is in flight', async () => {
   let active = 0;
   let peak = 0;
   let calls = 0;
+
   const refresh = refreshQueue(async () => {
     calls++;
     peak = Math.max(peak, ++active);
+
     if (calls === 1) await gate.promise;
     active--;
   });
+
   const first = refresh();
+
   for (let index = 0; index < 50; index++) refresh();
   expect(calls).toBe(1);
   gate.resolve();

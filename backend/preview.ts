@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { parseCommand } from '../shared/commands';
 import type { Preview, PreviewShot, Task } from '../shared/types';
 import { freePort, sandboxProfile } from './agents/opencode';
+import { thrownSchema } from './failure';
+import { readScripts } from './manifest';
 import { run, safeEnv, stopProcessGroup } from './process';
 
 const startTimeoutMs = 60_000;
@@ -11,10 +13,12 @@ const pollMs = 250;
 const settleMs = 300;
 const logLimit = 4000;
 const previewScripts = ['preview', 'dev', 'start', 'ui', 'serve'];
+
 const viewports = [
   { name: 'desktop', width: 1280, height: 800 },
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
+
 // Screenshots vary with animations, transitions, a blinking caret, and late web fonts, so capture waits for fonts and stills motion.
 const stillPage = `document.fonts.ready.then(() => {
   const style = document.createElement('style');
@@ -22,51 +26,108 @@ const stillPage = `document.fonts.ready.then(() => {
   document.head.append(style);
   return true;
 })`;
-const addressPattern = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d+[^\s'"<>)]*/;
 
-export type Browser = (session: string, args: string[]) => Promise<string>;
-export type Capture = (url: string, directory: string, session: string) => Promise<{ shots: PreviewShot[]; errors: string[] }>;
-export type App = { url: string; log: () => string; alive: () => boolean; stop: () => void; exited: Promise<number | null> };
+const addressPattern = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d+[^\s'"<>)]*/g;
+
+export type Browser = (session: string, args: string[], origin?: string) => Promise<string>;
+
+export type Capture = (
+  url: string,
+  directory: string,
+  session: string,
+) => Promise<{ shots: PreviewShot[]; errors: string[] }>;
+
+export type App = {
+  url: string;
+  log: () => string;
+  alive: () => boolean;
+  stop: () => void;
+  exited: Promise<number | null>;
+};
 
 type Resolved = Pick<Preview, 'command' | 'source'>;
-type CaptureOptions = { task: Task; cwd: string; root: string; candidate: string; message?: string; capture?: Capture; servicePort?: number };
+
+type CaptureOptions = {
+  task: Pick<Task, 'id' | 'preview'>;
+  cwd: string;
+  root: string;
+  candidate: string;
+  message?: string;
+  capture?: Capture;
+  servicePort?: number;
+};
 
 export function namedPreview(message = '') {
   const named = [...message.matchAll(/^PREVIEW:\s*`?([^`\n]+?)`?\s*$/gm)].at(-1);
+
   return named ? parseCommand(named[1]) : [];
 }
 
 export async function detectPreview(path: string) {
-  const manifest = await Bun.file(join(path, 'package.json')).json().catch(() => null);
-  const script = previewScripts.find(name => typeof manifest?.scripts?.[name] === 'string');
+  const scripts = await readScripts(path);
+  const script = previewScripts.find(name => scripts[name] !== undefined);
+
   if (!script) return [];
+
   return [(await Bun.file(join(path, 'bun.lock')).exists()) ? 'bun' : 'npm', 'run', script];
 }
 
 export async function resolvePreview(path: string, message?: string, previous?: Resolved | null): Promise<Resolved> {
   const named = namedPreview(message);
+
   if (named.length) return { command: named, source: 'agent' };
+
   if (previous?.command.length) return previous;
+
   return { command: await detectPreview(path), source: 'detected' };
 }
 
-export const previewSummary = (preview: Preview) => preview.status === 'captured'
-  ? `${preview.shots.length} screenshots${preview.errors.length ? `, ${preview.errors.length} page errors` : ''}`
-  : `Screenshots failed: ${preview.note}`;
+export const previewSummary = (preview: Preview) =>
+  preview.status === 'captured'
+    ? `${preview.shots.length} screenshots${preview.errors.length ? `, ${preview.errors.length} page errors` : ''}`
+    : `Screenshots failed: ${preview.note}`;
 
-// The app runs the repository's own scripts, so it gets the agent's sandbox plus loopback networking, minus the factory's own port.
-export async function startApp(command: string[], cwd: string, scratch: string, blockedPorts: number[] = []): Promise<App> {
+// A printed address could name any local service, the factory included, so it counts only when the app's own process group listens there.
+async function listensOn(group: number | undefined, port: number) {
+  const pids = lines(await run(['/usr/sbin/lsof', '-nP', '-t', `-iTCP:${port}`, '-sTCP:LISTEN']).catch(() => ''));
+
+  if (!group || !pids.length) return false;
+
+  return lines(await run(['/bin/ps', '-o', 'pgid=', '-p', pids.join(',')]).catch(() => '')).includes(String(group));
+}
+
+// The app runs the repository's own scripts, so it gets the agent's sandbox plus loopback listening. It can connect only to its own port.
+export async function startApp(
+  command: string[],
+  cwd: string,
+  scratch: string,
+  blockedPorts: number[] = [],
+): Promise<App> {
   await mkdir(join(scratch, 'tmp'), { recursive: true });
   const [worktree, tmp] = await Promise.all([realpath(cwd), realpath(join(scratch, 'tmp'))]);
   const profile = join(scratch, 'profile.sb');
-  await Bun.write(profile, sandboxProfile([worktree, tmp], { loopback: true, blockedPorts }));
   const port = freePort();
+  await Bun.write(
+    profile,
+    sandboxProfile([worktree, tmp], { listen: true, connectPorts: blockedPorts.includes(port) ? [] : [port] }),
+  );
+
   const child = spawn('/usr/bin/sandbox-exec', ['-f', profile, ...command], {
     cwd: worktree,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...safeEnv(), TMPDIR: tmp, PORT: String(port), HOST: '127.0.0.1', BROWSER: 'none', CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
+    env: {
+      ...safeEnv(),
+      TMPDIR: tmp,
+      PORT: String(port),
+      HOST: '127.0.0.1',
+      BROWSER: 'none',
+      CI: '1',
+      NO_COLOR: '1',
+      FORCE_COLOR: '0',
+    },
   });
+
   let output = '';
   const exit = Promise.withResolvers<number | null>();
   let exited = false;
@@ -75,31 +136,54 @@ export async function startApp(command: string[], cwd: string, scratch: string, 
     exit.resolve(code);
   });
   const stop = () => stopProcessGroup(child);
-  const reachable = (address: string) => fetch(address, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
+
+  const reachable = (address: string) =>
+    fetch(address, { signal: AbortSignal.timeout(2000) }).then(
+      () => true,
+      () => false,
+    );
+
   try {
     const url = await new Promise<string>((resolve, reject) => {
       let done = false;
+
       const finish = (error: Error | null, address = '') => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         clearInterval(poll);
+
         if (error) reject(Object.assign(error, { log: output }));
         else resolve(address);
       };
-      const tryAddress = (address: string) => reachable(address).then(up => up && finish(null, address));
+
+      const tryAddress = async (address: string) => {
+        const appPort = Number(address.match(/:(\d+)/)?.[1]);
+
+        if (blockedPorts.includes(appPort) || !(await reachable(address)) || !(await listensOn(child.pid, appPort)))
+          return;
+        finish(null, address);
+      };
+
       const collect = (chunk: Buffer) => {
         output = (output + chunk).slice(-logLimit);
-        const address = output.match(addressPattern)?.[0];
+        const address = [...output.matchAll(addressPattern)].at(-1)?.[0];
+
         if (address) tryAddress(address.replace('0.0.0.0', '127.0.0.1').replace('[::1]', '127.0.0.1'));
       };
+
       child.stdout.on('data', collect);
       child.stderr.on('data', collect);
       child.once('error', error => finish(error));
       child.once('exit', code => finish(new Error(`The app exited with ${code} before it was ready`)));
       const poll = setInterval(() => tryAddress(`http://127.0.0.1:${port}/`), pollMs);
-      const timer = setTimeout(() => finish(new Error(`The app did not start within ${startTimeoutMs / 1000} seconds`)), startTimeoutMs);
+
+      const timer = setTimeout(
+        () => finish(new Error(`The app did not start within ${startTimeoutMs / 1000} seconds`)),
+        startTimeoutMs,
+      );
     });
+
     return { url, log: () => output, alive: () => !exited, stop, exited: exit.promise };
   } catch (error) {
     stop();
@@ -107,11 +191,24 @@ export async function startApp(command: string[], cwd: string, scratch: string, 
   }
 }
 
-// Pages run code the agent wrote, so the browser is held to loopback: every other request goes to a proxy that does not exist.
-const browserEnv = () => ({ ...safeEnv(), AGENT_BROWSER_PROXY: 'http://127.0.0.1:9', AGENT_BROWSER_PROXY_BYPASS: '127.0.0.1,localhost' });
+// Pages run code the agent wrote, so the browser reaches the app's port and nothing else. Every other request goes to a proxy that
+// does not exist, and <-loopback> stops Chrome from sending other loopback ports, the factory's included, around that proxy.
+export const browserEnv = (origin?: string) => {
+  const port = origin ? new URL(origin).port : '';
+  const bypass = ['<-loopback>', ...(port ? [`127.0.0.1:${port}`, `localhost:${port}`] : [])];
 
-export const agentBrowser: Browser = (session, args) => run(['agent-browser', '--session', session, ...args], { env: browserEnv(), timeoutMs: 60_000 });
-export const lines = (text: string) => text.split('\n').map(line => line.trim()).filter(Boolean);
+  return { ...safeEnv(), AGENT_BROWSER_PROXY: 'http://127.0.0.1:9', AGENT_BROWSER_PROXY_BYPASS: bypass.join(',') };
+};
+
+// The browser reads its proxy settings when its session starts, so a session has to be closed before it can serve a new origin.
+export const agentBrowser: Browser = (session, args, origin) =>
+  run(['agent-browser', '--session', session, ...args], { env: browserEnv(origin), timeoutMs: 60_000 });
+
+export const lines = (text: string) =>
+  text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
 
 export async function loadPage(browser: Browser, session: string, url: string) {
   await browser(session, ['open', url]);
@@ -120,37 +217,62 @@ export async function loadPage(browser: Browser, session: string, url: string) {
   await browser(session, ['eval', stillPage]).catch(() => undefined);
 }
 
-export async function screenshot(browser: Browser, session: string, name: PreviewShot['name'], path: string): Promise<PreviewShot> {
+export async function screenshot(
+  browser: Browser,
+  session: string,
+  name: PreviewShot['name'],
+  path: string,
+): Promise<PreviewShot> {
   const { width, height } = viewports.find(viewport => viewport.name === name)!;
   await browser(session, ['set', 'viewport', String(width), String(height)]);
   await Bun.sleep(settleMs);
   await browser(session, ['screenshot', path]);
+
   return { name, width, height, path, bytes: (await stat(path)).size };
 }
 
 export async function pageErrors(browser: Browser, session: string) {
-  const [errors, consoleOutput] = await Promise.all([browser(session, ['errors']).catch(() => ''), browser(session, ['console']).catch(() => '')]);
+  const [errors, consoleOutput] = await Promise.all([
+    browser(session, ['errors']).catch(() => ''),
+    browser(session, ['console']).catch(() => ''),
+  ]);
+
   return [...lines(errors), ...lines(consoleOutput).filter(line => /\berror\b/i.test(line))];
 }
 
 const captureWithAgentBrowser: Capture = async (url, directory, session) => {
   const shots: PreviewShot[] = [];
+  const browser: Browser = (name, args) => agentBrowser(name, args, url);
+
   try {
+    await browser(session, ['close']).catch(() => undefined);
+
     for (const [index, { name }] of viewports.entries()) {
       if (index === 0) {
-        await agentBrowser(session, ['set', 'viewport', String(viewports[0].width), String(viewports[0].height)]);
-        await loadPage(agentBrowser, session, url);
+        await browser(session, ['set', 'viewport', String(viewports[0].width), String(viewports[0].height)]);
+        await loadPage(browser, session, url);
       }
-      shots.push(await screenshot(agentBrowser, session, name, join(directory, `${name}.png`)));
+
+      shots.push(await screenshot(browser, session, name, join(directory, `${name}.png`)));
     }
-    return { shots, errors: await pageErrors(agentBrowser, session) };
+
+    return { shots, errors: await pageErrors(browser, session) };
   } finally {
-    await agentBrowser(session, ['close']).catch(() => undefined);
+    await browser(session, ['close']).catch(() => undefined);
   }
 };
 
-export async function capturePreview({ task, cwd, root, candidate, message, capture = captureWithAgentBrowser, servicePort }: CaptureOptions): Promise<Preview | null> {
+export async function capturePreview({
+  task,
+  cwd,
+  root,
+  candidate,
+  message,
+  capture = captureWithAgentBrowser,
+  servicePort,
+}: CaptureOptions): Promise<Preview | null> {
   const { command, source } = await resolvePreview(cwd, message, task.preview);
+
   if (!command.length) return null;
   const directory = join(root, '.factory/artifacts', task.id, candidate, 'preview');
   const scratch = join(root, '.factory/sandbox', `preview-${task.id}`);
@@ -159,13 +281,37 @@ export async function capturePreview({ task, cwd, root, candidate, message, capt
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true });
   let app: App | null = null;
+
   try {
     app = await startApp(command, cwd, scratch, servicePort ? [servicePort] : []);
     const { shots, errors } = await capture(app.url, directory, `factory-preview-${task.id}`);
-    return { status: 'captured', candidate, command, source, url: app.url, shots, errors, log: app.log(), ...finished() };
+
+    return {
+      status: 'captured',
+      candidate,
+      command,
+      source,
+      url: app.url,
+      shots,
+      errors,
+      log: app.log(),
+      ...finished(),
+    };
   } catch (error) {
-    const log = (error as { log?: string }).log ?? app?.log();
-    return { status: 'failed', candidate, command, source, shots: [], errors: [], note: (error as Error).message, log, ...finished() };
+    const failure = thrownSchema.parse(error);
+    const log = failure.log ?? app?.log();
+
+    return {
+      status: 'failed',
+      candidate,
+      command,
+      source,
+      shots: [],
+      errors: [],
+      note: failure.message,
+      log,
+      ...finished(),
+    };
   } finally {
     app?.stop();
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);

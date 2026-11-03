@@ -5,8 +5,21 @@ import { arrivals, faviconHref, unseenAfter, without } from '../web/src/lib/noti
 const task = (id: string, status: TaskStatus, settled?: boolean) => ({ id, status, settled });
 
 test('only status changes into waiting, finished, or failed states notify', () => {
-  const previous = new Map<string, TaskStatus>([['a', 'running'], ['b', 'running'], ['c', 'handoff'], ['d', 'checking']]);
-  const next = [task('a', 'awaiting_approval'), task('b', 'checking'), task('c', 'handoff'), task('d', 'failed'), task('new', 'handoff')];
+  const previous = new Map<string, TaskStatus>([
+    ['a', 'running'],
+    ['b', 'running'],
+    ['c', 'handoff'],
+    ['d', 'checking'],
+  ]);
+
+  const next = [
+    task('a', 'awaiting_approval'),
+    task('b', 'checking'),
+    task('c', 'handoff'),
+    task('d', 'failed'),
+    task('new', 'handoff'),
+  ];
+
   expect(arrivals(previous, next).map(item => item.id)).toEqual(['a', 'd']);
   expect(arrivals(new Map(), next)).toEqual([]);
 });

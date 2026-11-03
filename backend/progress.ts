@@ -27,6 +27,7 @@ export class Progress extends EventEmitter {
 
   end(taskId: string, key?: string) {
     const current = this.entries.get(taskId);
+
     if (!current || (key !== undefined && current.key !== key)) return;
     this.entries.delete(taskId);
     this.touch(taskId);
@@ -44,10 +45,12 @@ export class Progress extends EventEmitter {
 
   private flush() {
     this.timer = null;
+
     for (const taskId of this.dirty) {
       const event: ProgressEvent = this.entries.get(taskId) ?? { taskId, cleared: true };
       this.emit('update', event);
     }
+
     this.dirty.clear();
   }
 }

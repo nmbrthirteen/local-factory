@@ -4,23 +4,34 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../backend/store';
 import { Terminal } from '../backend/terminal';
-import { cleanupAfterEach, until } from './support';
+import { cleanupAfterEach, idleAgent, until } from './support';
 
 const onCleanup = cleanupAfterEach();
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'factory-terminal-'));
   const store = new Store(':memory:');
-  const agent = { running: null as string | null };
+  const agent = idleAgent();
   const terminal = new Terminal(store, id => id === agent.running);
   onCleanup(async () => {
     await terminal.stopAll();
     store.close();
     await rm(root, { recursive: true, force: true });
   });
-  const task = store.create({ title: 'Run it', criteria: 'Run it', model: 'test', setup: [], check: [], repo: { path: root, base: 'abc' }, worktree: { path: root, branch: 'factory/run' } });
+
+  const task = store.create({
+    title: 'Run it',
+    criteria: 'Run it',
+    model: 'test',
+    setup: [],
+    check: [],
+    repo: { path: root, base: 'abc' },
+    worktree: { path: root, branch: 'factory/run' },
+  });
+
   store.update(task.id, { status: 'handoff' });
   const run = () => store.require(task.id).ownerCommand;
+
   return { root, store, terminal, agent, task, run };
 }
 
@@ -38,7 +49,7 @@ test('a command runs in the worktree, streams its output, and finds the local UR
 test('a long-running command stops on request, and commands wait for the agent run', async () => {
   const { terminal, agent, task, run } = await setup();
   await terminal.start(task.id, 'echo started; sleep 30');
-  await until(() => run()?.output.includes('started'));
+  await until(() => run()?.output.includes('started') === true);
   await expect(terminal.start(task.id, 'echo again')).rejects.toThrow(/already running/);
   terminal.stop(task.id);
   await until(() => run()?.status === 'stopped');
@@ -48,4 +59,11 @@ test('a long-running command stops on request, and commands wait for the agent r
   await expect(terminal.start(task.id, 'echo nope')).rejects.toThrow(/Wait for the agent run/);
   agent.running = null;
   await expect(terminal.start(task.id, '   ')).rejects.toThrow(/Choose a command/);
+});
+
+test('a command refuses to run once the worktree is gone, instead of running in the main checkout', async () => {
+  const { store, terminal, task } = await setup();
+  store.update(task.id, { worktreeRemoved: true });
+  await expect(terminal.start(task.id, 'echo hi')).rejects.toThrow(/worktree is gone/);
+  expect(store.require(task.id).ownerCommand).toBeFalsy();
 });

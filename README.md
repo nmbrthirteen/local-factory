@@ -20,7 +20,7 @@ You describe a change. Codex, Claude, or OpenCode builds it in its own Git workt
 
 - The factory runs the check itself, tied to the exact files the agent produced.
 - Screenshots and a running app to try before you merge.
-- One sandbox, approval flow, and time limit for every agent.
+- One sandbox, approval flow, and time limit for every agent. The "Automatic, full access" permission approves every escalation an agent asks for, so it lifts that sandbox.
 - Roll back, merge, open a pull request, or revert from the task.
 - Runs on your machine with your existing agent sign-ins.
 
